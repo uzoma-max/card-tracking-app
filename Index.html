@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card Tracking</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#f4f6f5; --surface:#ffffff; --surface-2:#f0f3f1; --border:#dde3df; --text:#17211b; --muted:#5d6b63;
+  --primary:#0b6b3a; --primary-ink:#ffffff; --primary-soft:#e3f1e8;
+  --warn:#9a5b00; --warn-soft:#fff3dc; --danger:#b42318; --danger-soft:#fde8e6; --info:#1d4f91; --info-soft:#e6eefa;
+  --c-ordered:#1d4f91; --c-received:#0e7c86; --c-distributed:#0b6b3a; --c-damaged:#b42318;
+  --radius:10px; --shadow:0 1px 2px rgba(16,24,20,.06),0 1px 3px rgba(16,24,20,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{margin:0;line-height:1.25}
+h2{font-size:18px} h3{font-size:15px}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.neg{color:var(--danger);font-weight:600}
+
+/* top bar */
+.topbar{background:var(--primary);color:var(--primary-ink);padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px;margin-right:auto}
+.brand svg{flex:none}
+.who{font-size:13px;opacity:.95}
+.topbar .btn{background:rgba(255,255,255,.14);border-color:transparent;color:#fff}
+.topbar .btn:hover{background:rgba(255,255,255,.24)}
+.tabs{display:flex;gap:2px;padding:0 12px;background:var(--surface);border-bottom:1px solid var(--border);overflow-x:auto}
+.tab{border:0;background:none;padding:12px 12px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;white-space:nowrap;font-weight:500}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.badge{display:inline-block;min-width:18px;padding:0 6px;border-radius:9px;background:var(--warn);color:#fff;font-size:11px;line-height:18px;text-align:center;margin-left:4px}
+main{max-width:1280px;margin:0 auto;padding:16px}
+
+/* basics */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
+.card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.card-head h2,.card-head h3{margin-right:auto}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--surface);padding:7px 12px;border-radius:8px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--danger);border-color:#f1c4bf}
+.btn.sm{padding:4px 9px;font-size:13px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:12px;font-weight:600;color:var(--muted)}
+input,select,textarea{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);width:100%;min-width:0}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.span2{grid-column:span 2}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filters>*{flex:1 1 150px;width:auto}
+.note{padding:10px 12px;border-radius:8px;font-size:13px}
+.note.info{background:var(--info-soft);color:var(--info)}
+.note.warn{background:var(--warn-soft);color:var(--warn)}
+.note.err{background:var(--danger-soft);color:var(--danger)}
+.note.ok{background:var(--primary-soft);color:var(--primary)}
+
+/* tables */
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px}
+table{border-collapse:collapse;width:100%;background:var(--surface)}
+th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+th{background:var(--surface-2);font-size:12px;font-weight:600;color:var(--muted);position:sticky;top:0;white-space:nowrap}
+tbody tr:hover{background:#fafcfb}
+tr.click{cursor:pointer}
+tfoot td{font-weight:700;background:var(--surface-2)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill.Approved{background:var(--primary-soft);color:var(--primary)}
+.pill.Pending{background:var(--warn-soft);color:var(--warn)}
+.pill.Rejected,.pill.Voided{background:var(--danger-soft);color:var(--danger)}
+.type-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.cov{display:flex;align-items:center;gap:8px;min-width:120px}
+.cov .bar{flex:1;height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;border:1px solid var(--border)}
+.cov .bar i{display:block;height:100%;background:var(--c-distributed)}
+.cov span{width:44px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+
+/* dashboard */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow);border-top:4px solid var(--border)}
+.kpi .k{font-size:12px;color:var(--muted);font-weight:600}
+.kpi .v{font-size:24px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.kpi .s{font-size:12px;color:var(--muted);margin-top:2px}
+.flow{display:flex;height:28px;border-radius:6px;overflow:hidden;border:1px solid var(--border);background:var(--surface-2)}
+.flow div{height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:13px}
+.crumbs{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:13px;margin-bottom:12px}
+.crumbs a{color:var(--primary);cursor:pointer;text-decoration:underline}
+.balance{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:4px}
+.balance div{background:var(--surface-2);border-radius:8px;padding:8px;font-size:12px;color:var(--muted)}
+.balance b{display:block;font-size:16px;color:var(--text);font-variant-numeric:tabular-nums}
+
+/* login */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+.login{width:100%;max-width:380px}
+.login h1{font-size:20px;margin-bottom:4px}
+
+/* modal + toast */
+.modal-bg{position:fixed;inset:0;background:rgba(10,20,15,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:50;overflow:auto}
+.modal{background:var(--surface);border-radius:12px;max-width:560px;width:100%;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.modal .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:calc(100% - 32px);max-width:520px}
+#toast .note{box-shadow:0 4px 14px rgba(0,0,0,.15);pointer-events:auto}
+.loading{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--primary),transparent);background-size:200% 100%;animation:ld 1s linear infinite;z-index:70}
+@keyframes ld{from{background-position:200% 0}to{background-position:-200% 0}}
+
+@media (max-width:900px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .balance{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:560px){
+  main{padding:12px}
+  .g2,.g3,.g4{grid-template-columns:minmax(0,1fr)}
+  .span2{grid-column:auto}
+  .kpi .v{font-size:20px}
+  .balance{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .who{width:100%;order:3}
+}
+@media print{.topbar,.tabs,.btn,.filters{display:none!important}.card{box-shadow:none}}
+</style>
+</head>
+<body>
+<div id="loading" class="loading hidden"></div>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="modal-root"></div>
+
+<script>
+/* =====================================================================
+ * Card Tracking – browser side
+ * ===================================================================== */
+var TYPES = ['Sent to Production', 'Received from Production', 'Distributed to Field', 'Damaged / Lost'];
+var TYPE_COLOR = {
+  'Sent to Production': 'var(--c-ordered)', 'Received from Production': 'var(--c-received)',
+  'Distributed to Field': 'var(--c-distributed)', 'Damaged / Lost': 'var(--c-damaged)'
+};
+var S = {
+  token: null, user: null, data: null, view: 'dashboard',
+  sum: { level: 'state', state: '', lga: '', community: '', q: '' },
+  mv: { q: '', type: '', status: '', state: '', from: '', to: '', limit: 200 },
+  wd: { q: '', state: '', limit: 300 },
+  form: {}, users: null, audit: null
+};
+
+/* ---------------- helpers ---------------- */
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function fmt(n) { return (Number(n) || 0).toLocaleString('en-NG'); }
+function pct(x) { return (Math.round((x || 0) * 1000) / 10).toFixed(1) + '%'; }
+function today() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function $(sel) { return document.querySelector(sel); }
+function store(k, v) { try { if (v === undefined) return sessionStorage.getItem(k); if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { return null; } }
+function isAdmin() { return S.user && S.user.role === 'admin'; }
+function canRecord() { return S.user && (S.user.role === 'admin' || S.user.role === 'officer'); }
+function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
+function sortAlpha(a) { return a.slice().sort(function (x, y) { return String(x).localeCompare(String(y)); }); }
+
+function toast(msg, kind) {
+  var el = document.createElement('div');
+  el.className = 'note ' + (kind || 'ok');
+  el.textContent = msg;
+  $('#toast').appendChild(el);
+  setTimeout(function () { el.remove(); }, kind === 'err' ? 7000 : 3500);
+}
+
+var busy = 0;
+function setBusy(d) { busy += d; $('#loading').classList.toggle('hidden', busy <= 0); }
+
+/** Calls the server. Resolves with data, rejects with an Error. */
+function call(action, payload) {
+  setBusy(1);
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (res) {
+        setBusy(-1);
+        if (res && res.ok) return resolve(res.data);
+        if (res && res.signedOut) { S.token = null; store('ct_token', null); renderLogin(res.error); }
+        reject(new Error(res ? res.error : 'No response from the server.'));
+      })
+      .withFailureHandler(function (err) {
+        setBusy(-1);
+        reject(new Error('Could not reach the server. Check your internet connection and try again. (' + (err && err.message || err) + ')'));
+      })
+      .api(action, S.token, payload || {});
+  });
+}
+
+/* ---------------- numbers & roll-ups ---------------- */
+function blank() { return { head: 0, ordered: 0, received: 0, distributed: 0, damaged: 0, wards: 0, pending: 0 }; }
+function finish(t) {
+  t.atProduction = t.ordered - t.received;
+  t.inStore = t.received - t.distributed - t.damaged;
+  t.coverage = t.head ? t.distributed / t.head : 0;
+  return t;
+}
+function addInto(t, r) {
+  t.head += r.head; t.ordered += r.ordered; t.received += r.received;
+  t.distributed += r.distributed; t.damaged += r.damaged; t.wards += 1; t.pending += r.pending;
+  return t;
+}
+
+/** Builds S.rows: every ward with its totals from APPROVED movements. */
+function compute() {
+  var d = S.data, byId = {};
+  d.wards.forEach(function (w) {
+    var r = Object.assign({}, w, blank());
+    r.head = w.head; byId[w.id] = r;
+  });
+  d.movements.forEach(function (m) {
+    var r = byId[m.wardId];
+    if (!r) return;
+    if (m.status === 'Pending') { r.pending += 1; return; }
+    if (m.status !== 'Approved') return;
+    if (m.type === TYPES[0]) r.ordered += m.quantity;
+    else if (m.type === TYPES[1]) r.received += m.quantity;
+    else if (m.type === TYPES[2]) r.distributed += m.quantity;
+    else if (m.type === TYPES[3]) r.damaged += m.quantity;
+  });
+  S.byId = byId;
+  S.rows = d.wards.map(function (w) { return finish(byId[w.id]); });
+  S.capital = {};
+  d.states.forEach(function (s) { S.capital[s.state] = s.capital; });
+  S.pendingCount = d.movements.filter(function (m) { return m.status === 'Pending'; }).length;
+}
+
+function rollup(rows, keys) {
+  var map = {}, order = [];
+  rows.forEach(function (r) {
+    var k = keys.map(function (f) { return r[f]; }).join('\u0001');
+    if (!map[k]) { map[k] = blank(); keys.forEach(function (f) { map[k][f] = r[f]; }); order.push(k); }
+    addInto(map[k], r);
+  });
+  return order.map(function (k) { return finish(map[k]); });
+}
+function total(rows) {
+  var t = blank();
+  rows.forEach(function (r) { addInto(t, r); });
+  t.wards = rows.reduce(function (a, r) { return a + (r.wards || 1); }, 0);
+  return finish(t);
+}
+function stateRows() {
+  var got = {};
+  rollup(S.rows, ['state']).forEach(function (r) { got[r.state] = r; });
+  return S.data.states.map(function (s) {
+    var r = got[s.state] || finish(Object.assign(blank(), { state: s.state }));
+    r.capital = s.capital;
+    return r;
+  });
+}
+
+/* ---------------- app shell ---------------- */
+var ICON = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>';
+
+function renderShell() {
+  var tabs = [['dashboard', 'Dashboard'], ['summary', 'Totals by area'], ['movements', 'Movements'], ['wards', 'Ward register']];
+  if (isAdmin()) tabs.push(['users', 'Users'], ['audit', 'Audit trail']);
+  $('#app').innerHTML =
+    '<header class="topbar"><div class="brand">' + ICON + 'Card Tracking</div>' +
+    '<span class="who">' + esc(S.user.fullName) + ' · ' + esc(S.user.role) + '</span>' +
+    '<button class="btn sm" id="b-refresh" title="Load the latest figures">Refresh</button>' +
+    '<button class="btn sm" id="b-export">Export to Excel</button>' +
+    '<button class="btn sm" id="b-pass">Password</button>' +
+    '<button class="btn sm" id="b-out">Sign out</button></header>' +
+    '<nav class="tabs">' + tabs.map(function (t) {
+      var badge = (t[0] === 'movements' && S.pendingCount) ? '<span class="badge">' + S.pendingCount + '</span>' : '';
+      return '<button class="tab' + (S.view === t[0] ? ' active' : '') + '" data-view="' + t[0] + '">' + t[1] + badge + '</button>';
+    }).join('') + '</nav><main id="main"></main>';
+  document.querySelectorAll('.tab').forEach(function (b) {
+    b.onclick = function () { S.view = b.dataset.view; renderShell(); };
+  });
+  $('#b-refresh').onclick = function () { load().then(function () { toast('Figures updated.'); }); };
+  $('#b-export').onclick = exportExcel;
+  $('#b-pass').onclick = changePasswordDialog;
+  $('#b-out').onclick = function () {
+    call('logout').catch(function () {});
+    S.token = null; store('ct_token', null); renderLogin();
+  };
+  renderView();
+}
+
+function renderView() {
+  var v = { dashboard: viewDashboard, summary: viewSummary, movements: viewMovements, wards: viewWards, users: viewUsers, audit: viewAudit }[S.view] || viewDashboard;
+  v($('#main'));
+}
+
+function load() {
+  return call('getData').then(function (d) {
+    S.data = d; S.user = d.user; compute(); renderShell();
+  }).catch(function (e) { toast(e.message, 'err'); });
+}
+
+/* ---------------- login / first-time setup ---------------- */
+function renderLogin(msg) {
+  $('#app').innerHTML = '<div class="login-wrap"><div class="card login">' +
+    '<div style="color:var(--primary);margin-bottom:8px">' + ICON + '</div>' +
+    '<h1>Card Tracking</h1><p class="muted" style="margin-top:0">Sign in to the card department system.</p>' +
+    (msg ? '<div class="note warn" style="margin-bottom:12px">' + esc(msg) + '</div>' : '') +
+    '<form id="f-login" class="grid">' +
+    '<div class="field"><label for="l-u">Username</label><input id="l-u" autocomplete="username" required></div>' +
+    '<div class="field"><label for="l-p">Password</label><input id="l-p" type="password" autocomplete="current-password" required></div>' +
+    '<div id="l-err"></div><button class="btn primary" type="submit">Sign in</button></form></div></div>';
+  $('#f-login').onsubmit = function (e) {
+    e.preventDefault();
+    call('login', { username: $('#l-u').value, password: $('#l-p').value })
+      .then(afterLogin)
+      .catch(function (err) { $('#l-err').innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; });
+  };
+}
+
+function renderSetup() {
+  $('#app').innerHTML = '<div class="login-wrap"><div class="card login">' +
+    '<div style="color:var(--primary);margin-bottom:8px">' + ICON + '</div>' +
+    '<h1>Welcome. Create the admin account</h1>' +
+    '<p class="muted" style="margin-top:0">This is the first time the app has been opened. The account you create now is the administrator. You can add your staff after signing in.</p>' +
+    '<form id="f-setup" class="grid">' +
+    '<div class="field"><label for="s-n">Your full name</label><input id="s-n" required></div>' +
+    '<div class="field"><label for="s-u">Username (no spaces)</label><input id="s-u" required autocomplete="username"></div>' +
+    '<div class="field"><label for="s-p">Password (at least 8 characters)</label><input id="s-p" type="password" required autocomplete="new-password"></div>' +
+    '<div class="field"><label for="s-p2">Type the password again</label><input id="s-p2" type="password" required autocomplete="new-password"></div>' +
+    '<div id="s-err"></div><button class="btn primary" type="submit">Create admin and sign in</button></form></div></div>';
+  $('#f-setup').onsubmit = function (e) {
+    e.preventDefault();
+    if ($('#s-p').value !== $('#s-p2').value) { $('#s-err').innerHTML = '<div class="note err">The two passwords do not match.</div>'; return; }
+    call('setupAdmin', { fullName: $('#s-n').value, username: $('#s-u').value, password: $('#s-p').value })
+      .then(afterLogin)
+      .catch(function (err) { $('#s-err').innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; });
+  };
+}
+
+function afterLogin(res) {
+  S.token = res.token; S.user = res.user; store('ct_token', res.token);
+  S.view = 'dashboard';
+  return load();
+}
+
+/* ---------------- Dashboard ---------------- */
+function viewDashboard(el) {
+  var t = total(S.rows);
+  var states = stateRows();
+  var negatives = S.rows.filter(function (r) { return r.inStore < 0 || r.atProduction < 0; });
+  var kp = function (k, v, s, color) {
+    return '<div class="kpi" style="border-top-color:' + color + '"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="s">' + s + '</div></div>';
+  };
+  var w = function (x) { return t.ordered ? Math.max(0, x) / t.ordered * 100 : 0; };
+  var alerts = '';
+  if (S.pendingCount) {
+    alerts += '<div class="note warn" style="margin-bottom:12px">' + S.pendingCount + ' movement' + (S.pendingCount > 1 ? 's are' : ' is') +
+      ' waiting for approval. They are not counted in the totals until an admin approves them. ' +
+      '<a href="#" id="go-pending" style="color:inherit;font-weight:600">Review now</a></div>';
+  }
+  if (negatives.length) {
+    alerts += '<div class="note err" style="margin-bottom:12px">' + negatives.length + ' ward' + (negatives.length > 1 ? 's have' : ' has') +
+      ' a negative balance (more cards recorded going out than coming in). Check the Ward register and Movements for: ' +
+      esc(negatives.slice(0, 5).map(function (r) { return r.id; }).join(', ')) + (negatives.length > 5 ? ' and more' : '') + '.</div>';
+  }
+  if (!S.data.wards.length) {
+    alerts += '<div class="note info" style="margin-bottom:12px">No wards in the register yet. ' +
+      (isAdmin() ? 'Go to <b>Ward register</b> to add wards one by one or import them from Excel.' : 'Ask your admin to add the wards.') + '</div>';
+  }
+  el.innerHTML = alerts +
+    '<div class="kpis">' +
+    kp('Head count', fmt(t.head), fmt(t.wards) + ' wards registered', 'var(--border)') +
+    kp('Cards ordered', fmt(t.ordered), 'sent to production', 'var(--c-ordered)') +
+    kp('Received from production', fmt(t.received), fmt(t.atProduction) + ' still at production', 'var(--c-received)') +
+    kp('Distributed to field', fmt(t.distributed), pct(t.coverage) + ' of head count covered', 'var(--c-distributed)') +
+    kp('In store (balance)', '<span class="' + (t.inStore < 0 ? 'neg' : '') + '">' + fmt(t.inStore) + '</span>', 'received minus distributed and written off', 'var(--c-received)') +
+    kp('Still at production', fmt(t.atProduction), 'ordered but not yet received', 'var(--c-ordered)') +
+    kp('Damaged / lost', fmt(t.damaged), 'written off', 'var(--c-damaged)') +
+    kp('Not yet covered', fmt(Math.max(0, t.head - t.distributed)), 'people still without cards', 'var(--warn)') +
+    '</div>' +
+    '<div class="card"><div class="card-head"><h3>Where the ordered cards are now</h3></div>' +
+    '<div class="flow" role="img" aria-label="Share of ordered cards by stage">' +
+    '<div style="width:' + w(t.distributed) + '%;background:var(--c-distributed)" title="Distributed ' + fmt(t.distributed) + '"></div>' +
+    '<div style="width:' + w(t.inStore) + '%;background:var(--c-received)" title="In store ' + fmt(t.inStore) + '"></div>' +
+    '<div style="width:' + w(t.damaged) + '%;background:var(--c-damaged)" title="Damaged / lost ' + fmt(t.damaged) + '"></div>' +
+    '<div style="width:' + w(t.atProduction) + '%;background:var(--c-ordered);opacity:.35" title="At production ' + fmt(t.atProduction) + '"></div></div>' +
+    '<div class="legend">' +
+    leg('var(--c-distributed)', 'Distributed', t.distributed) + leg('var(--c-received)', 'In store', t.inStore) +
+    leg('var(--c-damaged)', 'Damaged / lost', t.damaged) + leg('var(--c-ordered);opacity:.35', 'Still at production', t.atProduction) +
+    '</div></div>' +
+    '<div class="card"><div class="card-head"><h3>By state</h3><span class="muted">Click a state to see its LGAs</span></div>' +
+    sumTable(states, 'state', true) + '</div>';
+  var gp = $('#go-pending');
+  if (gp) gp.onclick = function (e) { e.preventDefault(); S.view = 'movements'; S.mv.status = 'Pending'; renderShell(); };
+  bindDrill(el, 'state');
+}
+function leg(color, label, v) {
+  return '<span><span class="type-dot" style="background:' + color + '"></span>' + label + ': <b>' + fmt(v) + '</b></span>';
+}
+
+/* ---------------- Totals by area ---------------- */
+var LEVELS = [['state', 'State'], ['lga', 'LGA'], ['community', 'Community'], ['ward', 'Ward']];
+
+function sumTable(rows, level, withCapital) {
+  var nameCols = {
+    state: [['state', 'State']].concat(withCapital ? [['capital', 'Capital']] : []),
+    lga: [['state', 'State'], ['lga', 'LGA']],
+    community: [['state', 'State'], ['lga', 'LGA'], ['community', 'Community']],
+    ward: [['id', 'Ward ID'], ['lga', 'LGA'], ['community', 'Community'], ['ward', 'Ward']]
+  }[level];
+  var t = total(rows);
+  var drill = level !== 'ward';
+  var h = '<div class="table-wrap"><table><thead><tr>' +
+    nameCols.map(function (c) { return '<th>' + c[1] + '</th>'; }).join('') +
+    '<th class="num">Head count</th><th class="num">Ordered</th><th class="num">Received</th><th class="num">Distributed</th>' +
+    '<th class="num">Damaged / lost</th><th class="num">Still at production</th><th class="num">In store</th><th>Coverage</th></tr></thead><tbody>';
+  if (!rows.length) h += '<tr><td colspan="' + (nameCols.length + 8) + '" class="muted">Nothing to show.</td></tr>';
+  rows.forEach(function (r) {
+    h += '<tr' + (drill ? ' class="click" data-drill="' + esc(JSON.stringify({ state: r.state, lga: r.lga || '', community: r.community || '' })) + '"' : '') + '>' +
+      nameCols.map(function (c) { return '<td>' + esc(r[c[0]]) + '</td>'; }).join('') + numCells(r) + '</tr>';
+  });
+  h += '</tbody><tfoot><tr><td colspan="' + nameCols.length + '">Total</td>' + numCells(t) + '</tr></tfoot></table></div>';
+  return h;
+}
+function numCells(r) {
+  var n = function (v) { return '<td class="num' + (v < 0 ? ' neg' : '') + '">' + fmt(v) + '</td>'; };
+  return n(r.head) + n(r.ordered) + n(r.received) + n(r.distributed) + n(r.damaged) + n(r.atProduction) + n(r.inStore) +
+    '<td><div class="cov"><div class="bar"><i style="width:' + Math.min(100, r.coverage * 100) + '%"></i></div><span>' + pct(r.coverage) + '</span></div></td>';
+}
+function bindDrill(el, level) {
+  el.querySelectorAll('tr[data-drill]').forEach(function (tr) {
+    tr.onclick = function () {
+      var d = JSON.parse(tr.dataset.drill);
+      var next = { state: 'lga', lga: 'community', community: 'ward' }[level];
+      S.sum = { level: next, state: d.state, lga: next === 'lga' ? '' : d.lga, community: next === 'ward' ? d.community : '', q: '' };
+      S.view = 'summary'; renderShell();
+    };
+  });
+}
+
+function viewSummary(el) {
+  var f = S.sum;
+  var rows = S.rows.filter(function (r) {
+    return (!f.state || r.state === f.state) && (!f.lga || r.lga === f.lga) && (!f.community || r.community === f.community);
+  });
+  var list;
+  if (f.level === 'state') list = stateRows().filter(function (r) { return !f.state || r.state === f.state; });
+  else if (f.level === 'lga') list = rollup(rows, ['state', 'lga']);
+  else if (f.level === 'community') list = rollup(rows, ['state', 'lga', 'community']);
+  else list = rows;
+  if (f.q) {
+    var q = f.q.toLowerCase();
+    list = list.filter(function (r) { return [r.state, r.lga, r.community, r.ward, r.id].join(' ').toLowerCase().indexOf(q) >= 0; });
+  }
+  if (f.level !== 'state') list = list.slice().sort(function (a, b) {
+    return [a.state, a.lga, a.community, a.ward].join('|').localeCompare([b.state, b.lga, b.community, b.ward].join('|'));
+  });
+
+  var states = S.data.states.map(function (s) { return s.state; });
+  var lgas = sortAlpha(uniq(S.rows.filter(function (r) { return !f.state || r.state === f.state; }).map(function (r) { return r.lga; })));
+  var comms = sortAlpha(uniq(S.rows.filter(function (r) { return (!f.state || r.state === f.state) && (!f.lga || r.lga === f.lga); }).map(function (r) { return r.community; })));
+
+  var crumbs = '<div class="crumbs"><a data-c="nat">Nigeria</a>' +
+    (f.state ? ' › <a data-c="state">' + esc(f.state) + (S.capital[f.state] ? ' (capital: ' + esc(S.capital[f.state]) + ')' : '') + '</a>' : '') +
+    (f.lga ? ' › <a data-c="lga">' + esc(f.lga) + ' LGA</a>' : '') +
+    (f.community ? ' › <span>' + esc(f.community) + '</span>' : '') + '</div>';
+
+  el.innerHTML = '<div class="card"><div class="card-head"><h2>Totals by area</h2>' +
+    '<span class="muted">Only approved movements are counted</span></div>' + crumbs +
+    '<div class="filters">' +
+    sel('f-level', LEVELS.map(function (l) { return [l[0], 'Show by ' + l[1]]; }), f.level) +
+    sel('f-state', [['', 'All states']].concat(states.map(function (s) { return [s, s]; })), f.state) +
+    sel('f-lga', [['', 'All LGAs']].concat(lgas.map(function (s) { return [s, s]; })), f.lga) +
+    sel('f-comm', [['', 'All communities']].concat(comms.map(function (s) { return [s, s]; })), f.community) +
+    '<input id="f-q" placeholder="Search names or ward ID" value="' + esc(f.q) + '">' +
+    '</div>' + sumTable(list, f.level, true) + '</div>';
+
+  $('#f-level').onchange = function () { f.level = this.value; renderView(); };
+  $('#f-state').onchange = function () { f.state = this.value; f.lga = ''; f.community = ''; renderView(); };
+  $('#f-lga').onchange = function () { f.lga = this.value; f.community = ''; renderView(); };
+  $('#f-comm').onchange = function () { f.community = this.value; renderView(); };
+  searchBox('#f-q', function (v) { f.q = v; });
+  el.querySelectorAll('.crumbs a').forEach(function (a) {
+    a.onclick = function () {
+      var c = a.dataset.c;
+      if (c === 'nat') S.sum = { level: 'state', state: '', lga: '', community: '', q: '' };
+      if (c === 'state') S.sum = { level: 'lga', state: f.state, lga: '', community: '', q: '' };
+      if (c === 'lga') S.sum = { level: 'community', state: f.state, lga: f.lga, community: '', q: '' };
+      renderView();
+    };
+  });
+  bindDrill(el, f.level);
+}
+
+function sel(id, options, value, extra) {
+  return '<select id="' + id + '"' + (extra || '') + '>' + options.map(function (o) {
+    return '<option value="' + esc(o[0]) + '"' + (String(o[0]) === String(value) ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+  }).join('') + '</select>';
+}
+
+/** A search box that re-renders after typing pauses, keeping focus. */
+function searchBox(selector, set) {
+  var input = $(selector), timer;
+  input.oninput = function () {
+    clearTimeout(timer);
+    var v = input.value, pos = input.selectionStart;
+    timer = setTimeout(function () {
+      set(v); renderView();
+      var again = $(selector);
+      if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) {} }
+    }, 300);
+  };
+}
+
+/* ---------------- Movements ---------------- */
+function viewMovements(el) {
+  var f = S.mv;
+  var list = S.data.movements.filter(function (m) {
+    var w = S.byId[m.wardId] || {};
+    if (f.type && m.type !== f.type) return false;
+    if (f.status && m.status !== f.status) return false;
+    if (f.state && w.state !== f.state) return false;
+    if (f.from && m.date < f.from) return false;
+    if (f.to && m.date > f.to) return false;
+    if (f.q) {
+      var hay = [m.id, m.reference, m.wardId, w.lga, w.community, w.ward, m.officer, m.approvedBy, m.remarks].join(' ').toLowerCase();
+      if (hay.indexOf(f.q.toLowerCase()) < 0) return false;
+    }
+    return true;
+  }).sort(function (a, b) { return (b.date + b.id).localeCompare(a.date + a.id); });
+  var sumQ = {};
+  list.forEach(function (m) { if (m.status === 'Approved') sumQ[m.type] = (sumQ[m.type] || 0) + m.quantity; });
+
+  var html = '';
+  if (canRecord()) html += '<div class="card" id="rec-card">' + recordFormHtml() + '</div>';
+  html += '<div class="card"><div class="card-head"><h2>Movements log</h2><span class="muted">' + fmt(list.length) + ' shown</span></div>' +
+    '<div class="filters">' +
+    '<input id="m-q" placeholder="Search ID, reference, ward, officer…" value="' + esc(f.q) + '">' +
+    sel('m-type', [['', 'All types']].concat(TYPES.map(function (t) { return [t, t]; })), f.type) +
+    sel('m-status', [['', 'Any status'], ['Approved', 'Approved'], ['Pending', 'Pending approval'], ['Rejected', 'Rejected'], ['Voided', 'Voided']], f.status) +
+    sel('m-state', [['', 'All states']].concat(S.data.states.map(function (s) { return [s.state, s.state]; })), f.state) +
+    '<input id="m-from" type="date" title="From date" value="' + esc(f.from) + '">' +
+    '<input id="m-to" type="date" title="To date" value="' + esc(f.to) + '">' +
+    '</div>' +
+    '<div class="legend" style="margin:-4px 0 12px">' + TYPES.map(function (t) { return leg(TYPE_COLOR[t], t + ' (approved)', sumQ[t] || 0); }).join('') + '</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Date</th><th>ID / Ref.</th><th>Ward</th><th>Type</th><th class="num">Quantity</th>' +
+    '<th>Officer</th><th>Status</th><th>Approved by</th><th>Remarks</th>' + (isAdmin() ? '<th></th>' : '') + '</tr></thead><tbody>' +
+    (list.length ? '' : '<tr><td colspan="10" class="muted">No movements match.</td></tr>') +
+    list.slice(0, f.limit).map(function (m) {
+      var w = S.byId[m.wardId] || {};
+      var act = '';
+      if (isAdmin() && m.status === 'Pending') act = '<button class="btn sm primary" data-ap="' + esc(m.id) + '">Approve</button> <button class="btn sm danger" data-rj="' + esc(m.id) + '">Reject</button>';
+      if (isAdmin() && m.status === 'Approved') act = '<button class="btn sm danger" data-vd="' + esc(m.id) + '">Void</button>';
+      return '<tr><td style="white-space:nowrap">' + esc(m.date) + '</td><td style="white-space:nowrap"><b>' + esc(m.id) + '</b>' + (m.reference ? '<br><span class="muted">' + esc(m.reference) + '</span>' : '') + '</td>' +
+        '<td>' + esc(w.ward || m.wardId) + '<br><span class="muted">' + esc([w.community, w.lga, w.state].filter(Boolean).join(', ')) + '</span></td>' +
+        '<td style="white-space:nowrap"><span class="type-dot" style="background:' + TYPE_COLOR[m.type] + '"></span>' + esc(m.type) + '</td>' +
+        '<td class="num">' + fmt(m.quantity) + '</td><td>' + esc(m.officer) + '<br><span class="muted">entered by ' + esc(m.recordedBy) + '</span></td>' +
+        '<td><span class="pill ' + esc(m.status) + '">' + esc(m.status) + '</span></td>' +
+        '<td>' + esc(m.approvedBy) + (m.approvedAt ? '<br><span class="muted">' + esc(m.approvedAt) + '</span>' : '') + '</td>' +
+        '<td>' + esc(m.remarks) + (m.note ? '<br><span class="muted">' + esc(m.note) + '</span>' : '') + '</td>' +
+        (isAdmin() ? '<td style="white-space:nowrap">' + act + '</td>' : '') + '</tr>';
+    }).join('') + '</tbody></table></div>' +
+    (list.length > f.limit ? '<div style="margin-top:10px"><button class="btn" id="m-more">Show more</button></div>' : '') +
+    (isAdmin() ? '<div style="margin-top:12px"><button class="btn" id="m-import">Import movements from Excel</button></div>' : '') +
+    '</div>';
+  el.innerHTML = html;
+
+  searchBox('#m-q', function (v) { f.q = v; });
+  $('#m-type').onchange = function () { f.type = this.value; renderView(); };
+  $('#m-status').onchange = function () { f.status = this.value; renderView(); };
+  $('#m-state').onchange = function () { f.state = this.value; renderView(); };
+  $('#m-from').onchange = function () { f.from = this.value; renderView(); };
+  $('#m-to').onchange = function () { f.to = this.value; renderView(); };
+  if ($('#m-more')) $('#m-more').onclick = function () { f.limit += 200; renderView(); };
+  if ($('#m-import')) $('#m-import').onclick = function () { importDialog('movements'); };
+  el.querySelectorAll('[data-ap]').forEach(function (b) {
+    b.onclick = function () {
+      call('approveMovement', { id: b.dataset.ap }).then(function () { toast(b.dataset.ap + ' approved.'); return load(); })
+        .catch(function (e) { toast(e.message, 'err'); });
+    };
+  });
+  el.querySelectorAll('[data-rj]').forEach(function (b) {
+    b.onclick = function () { reasonDialog('Reject ' + b.dataset.rj, 'Why is this movement being rejected? The officer will see this.', 'rejectMovement', b.dataset.rj); };
+  });
+  el.querySelectorAll('[data-vd]').forEach(function (b) {
+    b.onclick = function () { reasonDialog('Void ' + b.dataset.vd, 'Voiding removes this movement from the totals but keeps it in the log. Give a reason.', 'voidMovement', b.dataset.vd); };
+  });
+  if (canRecord()) bindRecordForm();
+}
+
+function recordFormHtml() {
+  var F = S.form;
+  if (!F.date) F.date = today();
+  if (!F.type) F.type = TYPES[2];
+  if (F.officer === undefined) F.officer = S.user.fullName;
+  var lgas = sortAlpha(uniq(S.rows.filter(function (r) { return r.state === F.state; }).map(function (r) { return r.lga; })));
+  var comms = sortAlpha(uniq(S.rows.filter(function (r) { return r.state === F.state && r.lga === F.lga; }).map(function (r) { return r.community; })));
+  var wards = S.rows.filter(function (r) { return r.state === F.state && r.lga === F.lga && r.community === F.community; })
+    .sort(function (a, b) { return a.ward.localeCompare(b.ward); });
+  var statesWithWards = uniq(S.rows.map(function (r) { return r.state; }));
+  var w = F.wardId ? S.byId[F.wardId] : null;
+  var bal = '';
+  if (w) {
+    var hint = '';
+    if (F.type === TYPES[1]) hint = 'You can receive up to <b>' + fmt(w.atProduction) + '</b> more cards for this ward.';
+    if (F.type === TYPES[2] || F.type === TYPES[3]) hint = 'You can ' + (F.type === TYPES[2] ? 'distribute' : 'write off') + ' up to <b>' + fmt(w.inStore) + '</b> cards (the in-store balance).';
+    if (F.type === TYPES[0]) hint = 'Head count still not ordered for: <b>' + fmt(Math.max(0, w.head - w.ordered)) + '</b>.';
+    bal = '<div class="span2" style="grid-column:1/-1"><div class="muted" style="font-size:12px;font-weight:600">Current balance for ' + esc(w.ward) + ' (' + esc(w.id) + ')</div>' +
+      '<div class="balance"><div>Head count<b>' + fmt(w.head) + '</b></div><div>Ordered<b>' + fmt(w.ordered) + '</b></div>' +
+      '<div>Still at production<b>' + fmt(w.atProduction) + '</b></div><div>In store<b>' + fmt(w.inStore) + '</b></div>' +
+      '<div>Distributed<b>' + fmt(w.distributed) + '</b></div></div>' +
+      '<div class="note info" style="margin-top:8px">' + hint + (w.pending ? ' This ward also has ' + w.pending + ' movement(s) waiting for approval.' : '') + '</div></div>';
+  }
+  return '<div class="card-head"><h2>Record a movement</h2><span class="muted">' +
+    (isAdmin() ? 'As admin, your entries are approved straight away.' : 'Your entry will wait for an admin to approve it.') + '</span></div>' +
+    (statesWithWards.length ? '' : '<div class="note info" style="margin-bottom:12px">Add wards to the Ward register first.</div>') +
+    '<form id="f-rec" class="grid g4" autocomplete="off">' +
+    '<div class="field"><label for="r-type">Movement type</label>' + sel('r-type', TYPES.map(function (t) { return [t, t]; }), F.type) + '</div>' +
+    '<div class="field"><label for="r-date">Date</label><input id="r-date" type="date" required value="' + esc(F.date) + '" max="' + today() + '"></div>' +
+    '<div class="field"><label for="r-qty">Quantity (cards)</label><input id="r-qty" type="number" min="1" step="1" required value="' + esc(F.quantity || '') + '"></div>' +
+    '<div class="field"><label for="r-ref">Reference / document no.</label><input id="r-ref" placeholder="e.g. waybill or delivery note" value="' + esc(F.reference || '') + '"></div>' +
+    '<div class="field"><label for="r-state">State</label>' + sel('r-state', [['', 'Choose state']].concat(sortAlpha(statesWithWards).map(function (s) { return [s, s]; })), F.state) + '</div>' +
+    '<div class="field"><label for="r-lga">LGA</label>' + sel('r-lga', [['', F.state ? 'Choose LGA' : '—']].concat(lgas.map(function (s) { return [s, s]; })), F.lga) + '</div>' +
+    '<div class="field"><label for="r-comm">Community</label>' + sel('r-comm', [['', F.lga ? 'Choose community' : '—']].concat(comms.map(function (s) { return [s, s]; })), F.community) + '</div>' +
+    '<div class="field"><label for="r-ward">Ward</label>' + sel('r-ward', [['', F.community ? 'Choose ward' : '—']].concat(wards.map(function (r) { return [r.id, r.ward + ' (' + r.id + ')']; })), F.wardId) + '</div>' +
+    bal +
+    '<div class="field"><label for="r-off">Officer (handled by)</label><input id="r-off" required value="' + esc(F.officer) + '"></div>' +
+    '<div class="field span2"><label for="r-rem">Remarks</label><input id="r-rem" placeholder="Optional. Required for damaged / lost" value="' + esc(F.remarks || '') + '"></div>' +
+    '<div class="field" style="justify-content:flex-end"><button class="btn primary" type="submit">Save movement</button></div>' +
+    '</form>';
+}
+
+function bindRecordForm() {
+  var F = S.form;
+  var keep = function () {
+    F.type = $('#r-type').value; F.date = $('#r-date').value; F.quantity = $('#r-qty').value;
+    F.reference = $('#r-ref').value; F.officer = $('#r-off').value; F.remarks = $('#r-rem').value;
+  };
+  var redraw = function () { keep(); $('#rec-card').innerHTML = recordFormHtml(); bindRecordForm(); };
+  $('#r-type').onchange = redraw;
+  $('#r-state').onchange = function () { F.state = this.value; F.lga = F.community = F.wardId = ''; redraw(); };
+  $('#r-lga').onchange = function () { F.lga = this.value; F.community = F.wardId = ''; redraw(); };
+  $('#r-comm').onchange = function () { F.community = this.value; F.wardId = ''; redraw(); };
+  $('#r-ward').onchange = function () { F.wardId = this.value; redraw(); };
+  $('#f-rec').onsubmit = function (e) {
+    e.preventDefault(); keep();
+    if (!F.wardId) return toast('Choose the state, LGA, community and ward.', 'err');
+    if (F.type === TYPES[3] && !F.remarks.trim()) return toast('Please write a remark explaining the damage or loss.', 'err');
+    var btn = this.querySelector('button[type=submit]'); btn.disabled = true;
+    call('recordMovement', {
+      date: F.date, type: F.type, quantity: Number(F.quantity), wardId: F.wardId,
+      reference: F.reference, officer: F.officer, remarks: F.remarks
+    }).then(function (r) {
+      toast(r.id + ' saved' + (r.status === 'Pending' ? '. It is waiting for approval.' : ' and approved.'));
+      F.quantity = ''; F.reference = ''; F.remarks = '';
+      return load();
+    }).catch(function (err) { btn.disabled = false; toast(err.message, 'err'); });
+  };
+}
+
+/* ---------------- Ward register ---------------- */
+function viewWards(el) {
+  var f = S.wd;
+  var list = S.rows.filter(function (r) {
+    if (f.state && r.state !== f.state) return false;
+    if (f.q && [r.id, r.lga, r.community, r.ward].join(' ').toLowerCase().indexOf(f.q.toLowerCase()) < 0) return false;
+    return true;
+  }).sort(function (a, b) { return [a.state, a.lga, a.community, a.ward].join('|').localeCompare([b.state, b.lga, b.community, b.ward].join('|')); });
+  el.innerHTML = '<div class="card"><div class="card-head"><h2>Ward register</h2><span class="muted">' + fmt(list.length) + ' wards</span>' +
+    (isAdmin() ? '<button class="btn primary" id="w-add">Add ward</button><button class="btn" id="w-import">Import wards from Excel</button>' : '') + '</div>' +
+    '<p class="muted" style="margin-top:0">The lowest level: State › LGA › Community › Ward. Head count is entered per ward and adds up to every level above it.</p>' +
+    '<div class="filters"><input id="w-q" placeholder="Search ward ID, LGA, community, ward" value="' + esc(f.q) + '">' +
+    sel('w-state', [['', 'All states']].concat(S.data.states.map(function (s) { return [s.state, s.state]; })), f.state) + '</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Ward ID</th><th>State</th><th>LGA</th><th>Community</th><th>Ward</th>' +
+    '<th class="num">Head count</th><th class="num">Distributed</th><th class="num">In store</th><th>Coverage</th>' + (isAdmin() ? '<th></th>' : '') + '</tr></thead><tbody>' +
+    (list.length ? '' : '<tr><td colspan="10" class="muted">No wards yet.</td></tr>') +
+    list.slice(0, f.limit).map(function (r) {
+      return '<tr><td><b>' + esc(r.id) + '</b></td><td>' + esc(r.state) + '</td><td>' + esc(r.lga) + '</td><td>' + esc(r.community) + '</td><td>' + esc(r.ward) + '</td>' +
+        '<td class="num">' + fmt(r.head) + '</td><td class="num">' + fmt(r.distributed) + '</td><td class="num' + (r.inStore < 0 ? ' neg' : '') + '">' + fmt(r.inStore) + '</td>' +
+        '<td><div class="cov"><div class="bar"><i style="width:' + Math.min(100, r.coverage * 100) + '%"></i></div><span>' + pct(r.coverage) + '</span></div></td>' +
+        (isAdmin() ? '<td><button class="btn sm" data-ed="' + esc(r.id) + '">Edit</button></td>' : '') + '</tr>';
+    }).join('') + '</tbody></table></div>' +
+    (list.length > f.limit ? '<div style="margin-top:10px"><button class="btn" id="w-more">Show more</button></div>' : '') + '</div>';
+  searchBox('#w-q', function (v) { f.q = v; });
+  $('#w-state').onchange = function () { f.state = this.value; renderView(); };
+  if ($('#w-more')) $('#w-more').onclick = function () { f.limit += 300; renderView(); };
+  if ($('#w-add')) $('#w-add').onclick = function () { wardDialog(null); };
+  if ($('#w-import')) $('#w-import').onclick = function () { importDialog('wards'); };
+  el.querySelectorAll('[data-ed]').forEach(function (b) { b.onclick = function () { wardDialog(S.byId[b.dataset.ed]); }; });
+}
+
+function wardDialog(w) {
+  w = w || { state: S.wd.state || '', lga: '', community: '', ward: '', head: '' };
+  var lgas = sortAlpha(uniq(S.rows.map(function (r) { return r.lga; })));
+  var comms = sortAlpha(uniq(S.rows.map(function (r) { return r.community; })));
+  openModal('<h2>' + (w.id ? 'Edit ward ' + esc(w.id) : 'Add a ward') + '</h2>' +
+    '<form id="f-ward" class="grid g2" style="margin-top:12px">' +
+    '<div class="field"><label for="wd-state">State</label>' + sel('wd-state', [['', 'Choose state']].concat(S.data.states.map(function (s) { return [s.state, s.state + ' (capital: ' + s.capital + ')']; })), w.state, ' required') + '</div>' +
+    '<div class="field"><label for="wd-lga">LGA</label><input id="wd-lga" list="dl-lga" required value="' + esc(w.lga) + '"></div>' +
+    '<div class="field"><label for="wd-comm">Community</label><input id="wd-comm" list="dl-comm" required value="' + esc(w.community) + '"></div>' +
+    '<div class="field"><label for="wd-ward">Ward name</label><input id="wd-ward" required value="' + esc(w.ward) + '"></div>' +
+    '<div class="field"><label for="wd-head">Head count (people)</label><input id="wd-head" type="number" min="0" step="1" required value="' + esc(w.head) + '"></div>' +
+    '<datalist id="dl-lga">' + lgas.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+    '<datalist id="dl-comm">' + comms.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+    '<div id="wd-err" style="grid-column:1/-1"></div>' +
+    '<div class="actions" style="grid-column:1/-1;margin-top:0"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Save ward</button></div></form>');
+  $('#f-ward').onsubmit = function (e) {
+    e.preventDefault();
+    call('saveWard', { id: w.id || '', state: $('#wd-state').value, lga: $('#wd-lga').value, community: $('#wd-comm').value, ward: $('#wd-ward').value, head: $('#wd-head').value })
+      .then(function (r) { closeModal(); toast('Ward ' + r.id + ' saved.'); return load(); })
+      .catch(function (err) { $('#wd-err').innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; });
+  };
+}
+
+/* ---------------- Users ---------------- */
+function viewUsers(el) {
+  el.innerHTML = '<div class="card"><div class="card-head"><h2>Users</h2><button class="btn primary" id="u-add">Add user</button></div>' +
+    '<div class="note info" style="margin-bottom:12px"><b>Admin</b> records and approves movements, manages wards and users. ' +
+    '<b>Officer</b> records movements, which wait for an admin to approve. <b>Viewer</b> can only look and export.</div><div id="u-list" class="muted">Loading…</div></div>';
+  $('#u-add').onclick = function () { userDialog(null); };
+  call('listUsers').then(function (users) {
+    S.users = users;
+    $('#u-list').classList.remove('muted');
+    $('#u-list').innerHTML = '<div class="table-wrap"><table><thead><tr><th>Username</th><th>Full name</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>' +
+      users.map(function (u) {
+        return '<tr><td><b>' + esc(u.username) + '</b></td><td>' + esc(u.fullName) + '</td><td>' + esc(u.role) + '</td>' +
+          '<td><span class="pill ' + (u.active ? 'Approved' : 'Voided') + '">' + (u.active ? 'Active' : 'Disabled') + '</span></td>' +
+          '<td><button class="btn sm" data-u="' + esc(u.username) + '">Edit</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    el.querySelectorAll('[data-u]').forEach(function (b) {
+      b.onclick = function () { userDialog(users.filter(function (u) { return u.username === b.dataset.u; })[0]); };
+    });
+  }).catch(function (e) { $('#u-list').innerHTML = '<div class="note err">' + esc(e.message) + '</div>'; });
+}
+
+function userDialog(u) {
+  var isNew = !u;
+  u = u || { username: '', fullName: '', role: 'viewer', active: true };
+  openModal('<h2>' + (isNew ? 'Add a user' : 'Edit ' + esc(u.username)) + '</h2>' +
+    '<form id="f-user" class="grid g2" style="margin-top:12px" autocomplete="off">' +
+    '<div class="field"><label for="u-name">Full name</label><input id="u-name" required value="' + esc(u.fullName) + '"></div>' +
+    '<div class="field"><label for="u-user">Username</label><input id="u-user" required value="' + esc(u.username) + '"' + (isNew ? '' : ' disabled') + '></div>' +
+    '<div class="field"><label for="u-role">Role</label>' + sel('u-role', [['viewer', 'Viewer (look and export only)'], ['officer', 'Officer (records movements)'], ['admin', 'Admin (approves, manages)']], u.role) + '</div>' +
+    '<div class="field"><label for="u-active">Status</label>' + sel('u-active', [['yes', 'Active'], ['no', 'Disabled (cannot sign in)']], u.active ? 'yes' : 'no') + '</div>' +
+    '<div class="field span2"><label for="u-pass">' + (isNew ? 'Starting password (at least 8 characters)' : 'New password (leave empty to keep the current one)') + '</label>' +
+    '<input id="u-pass" type="text" ' + (isNew ? 'required' : '') + ' autocomplete="new-password"></div>' +
+    '<div class="muted span2" style="font-size:12px">Give the password to the person privately and ask them to change it after signing in (Password button at the top).</div>' +
+    '<div id="u-err" style="grid-column:1/-1"></div>' +
+    '<div class="actions" style="grid-column:1/-1;margin-top:0"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Save user</button></div></form>');
+  $('#f-user').onsubmit = function (e) {
+    e.preventDefault();
+    call('saveUser', { isNew: isNew, username: $('#u-user').value, fullName: $('#u-name').value, role: $('#u-role').value, active: $('#u-active').value === 'yes', password: $('#u-pass').value })
+      .then(function () { closeModal(); toast('User saved.'); viewUsers($('#main')); })
+      .catch(function (err) { $('#u-err').innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; });
+  };
+}
+
+function changePasswordDialog() {
+  openModal('<h2>Change your password</h2><form id="f-pw" class="grid" style="margin-top:12px">' +
+    '<div class="field"><label for="pw-o">Current password</label><input id="pw-o" type="password" required autocomplete="current-password"></div>' +
+    '<div class="field"><label for="pw-n">New password (at least 8 characters)</label><input id="pw-n" type="password" required autocomplete="new-password"></div>' +
+    '<div class="field"><label for="pw-n2">Type the new password again</label><input id="pw-n2" type="password" required autocomplete="new-password"></div>' +
+    '<div id="pw-err"></div><div class="actions" style="margin-top:0"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Change password</button></div></form>');
+  $('#f-pw').onsubmit = function (e) {
+    e.preventDefault();
+    if ($('#pw-n').value !== $('#pw-n2').value) { $('#pw-err').innerHTML = '<div class="note err">The new passwords do not match.</div>'; return; }
+    call('changePassword', { oldPassword: $('#pw-o').value, newPassword: $('#pw-n').value })
+      .then(function () { closeModal(); toast('Password changed.'); })
+      .catch(function (err) { $('#pw-err').innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; });
+  };
+}
+
+/* ---------------- Audit ---------------- */
+function viewAudit(el) {
+  el.innerHTML = '<div class="card"><div class="card-head"><h2>Audit trail</h2><span class="muted">Every sign-in and change, newest first (last 1,000)</span></div><div id="a-list" class="muted">Loading…</div></div>';
+  call('getAudit').then(function (rows) {
+    S.audit = rows;
+    $('#a-list').classList.remove('muted');
+    $('#a-list').innerHTML = '<div class="table-wrap"><table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Details</th></tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr><td style="white-space:nowrap">' + esc(r.time) + '</td><td>' + esc(r.user) + '</td><td>' + esc(r.action) + '</td><td>' + esc(r.details) + '</td></tr>'; }).join('') +
+      '</tbody></table></div>';
+  }).catch(function (e) { $('#a-list').innerHTML = '<div class="note err">' + esc(e.message) + '</div>'; });
+}
+
+/* ---------------- Modals ---------------- */
+function openModal(inner) {
+  $('#modal-root').innerHTML = '<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true">' + inner + '</div></div>';
+  $('#modal-root').querySelectorAll('[data-close]').forEach(function (b) { b.onclick = closeModal; });
+  var first = $('#modal-root').querySelector('input:not([disabled]),select');
+  if (first) first.focus();
+}
+function closeModal() { $('#modal-root').innerHTML = ''; }
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+
+function reasonDialog(title, text, action, id) {
+  openModal('<h2>' + esc(title) + '</h2><p class="muted">' + esc(text) + '</p><form id="f-reason">' +
+    '<textarea id="rs-t" rows="3" required></textarea><div id="rs-err" style="margin-top:8px"></div>' +
+    '<div class="actions"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Confirm</button></div></form>');
+  $('#f-reason').onsubmit = function (e) {
+    e.preventDefault();
+    call(action, { id: id, note: $('#rs-t').value })
+      .then(function () { closeModal(); toast('Done.'); return load(); })
+      .catch(function (err) { $('#rs-err').innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; });
+  };
+}
+
+/* ---------------- Excel import ---------------- */
+var IMPORT = {
+  wards: {
+    title: 'Import wards from Excel',
+    help: 'Use a sheet with the columns <b>State, LGA, Community, Ward, Head Count</b> (a <b>Ward ID</b> column is optional). ' +
+      'If a Ward ID already exists, that ward is updated. Otherwise a new ward is added and given an ID.',
+    map: { wardid: 'id', state: 'state', lga: 'lga', community: 'community', ward: 'ward', headcount: 'head' },
+    required: ['state', 'lga', 'community', 'ward', 'head'],
+    action: 'importWards'
+  },
+  movements: {
+    title: 'Import movements from Excel',
+    help: 'Use a sheet with the columns <b>Date, Ward ID, Movement Type, Quantity</b> and optionally <b>Reference No., Officer, Approved By, Remarks</b>. ' +
+      'Imported movements are saved as approved, so only import records that were already checked. Balance checks are not applied to imports.',
+    map: { date: 'date', referenceno: 'reference', reference: 'reference', wardid: 'wardId', movementtype: 'type', type: 'type', quantity: 'quantity', officer: 'officer', approvedby: 'approvedBy', remarks: 'remarks' },
+    required: ['date', 'wardId', 'type', 'quantity'],
+    action: 'importMovements'
+  }
+};
+
+function normHead(h) {
+  var k = String(h || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z]/g, '');
+  return k;
+}
+function mapHeader(kind, h) {
+  var k = normHead(h), map = IMPORT[kind].map;
+  if (map[k]) return map[k];
+  if (k.indexOf('headcount') === 0 && map.headcount) return 'head';
+  if (k.indexOf('quantity') === 0 && map.quantity) return 'quantity';
+  if (k.indexOf('officer') === 0 && map.officer) return 'officer';
+  if (k.indexOf('reference') === 0 && map.reference) return 'reference';
+  return null;
+}
+function cellOut(v) {
+  if (v instanceof Date) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+  return v;
+}
+
+function importDialog(kind) {
+  var cfg = IMPORT[kind], wb = null, parsed = null;
+  openModal('<h2>' + cfg.title + '</h2><p class="muted">' + cfg.help + '</p>' +
+    '<div class="grid"><div class="field"><label for="im-file">Excel file (.xlsx, .xls or .csv)</label><input id="im-file" type="file" accept=".xlsx,.xls,.csv"></div>' +
+    '<div class="field hidden" id="im-sheet-wrap"><label for="im-sheet">Sheet</label><select id="im-sheet"></select></div>' +
+    '<div id="im-info"></div></div>' +
+    '<div class="actions"><button type="button" class="btn" data-close>Close</button><button class="btn primary" id="im-go" disabled>Import</button></div>');
+  if (typeof XLSX === 'undefined') { $('#im-info').innerHTML = '<div class="note err">The Excel reader did not load. Check your internet connection and reload the page.</div>'; return; }
+
+  function parse() {
+    var ws = wb.Sheets[$('#im-sheet').value];
+    var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+    var headerRow = -1, cols = null;
+    for (var i = 0; i < Math.min(15, aoa.length); i++) {
+      var c = aoa[i].map(function (h) { return mapHeader(kind, h); });
+      var found = cfg.required.filter(function (r) { return c.indexOf(r) >= 0; });
+      if (found.length === cfg.required.length) { headerRow = i; cols = c; break; }
+    }
+    if (headerRow < 0) {
+      parsed = null; $('#im-go').disabled = true;
+      $('#im-info').innerHTML = '<div class="note err">Could not find the needed columns on this sheet. Needed: ' + cfg.required.join(', ') + '.</div>';
+      return;
+    }
+    var rows = [];
+    for (var r = headerRow + 1; r < aoa.length; r++) {
+      var line = aoa[r];
+      if (!line.some(function (v) { return String(v).trim() !== ''; })) continue;
+      var o = { _row: r + 1 };
+      cols.forEach(function (key, ci) { if (key && o[key] === undefined) o[key] = cellOut(line[ci]); });
+      // Skip blank or total lines (no names, only numbers or formulas).
+      if (cfg.required.filter(function (k) { return k !== 'head' && k !== 'quantity'; })
+        .every(function (k) { return String(o[k] === undefined ? '' : o[k]).trim() === ''; })) continue;
+      rows.push(o);
+    }
+    parsed = rows;
+    $('#im-go').disabled = !rows.length;
+    $('#im-info').innerHTML = '<div class="note info">Found <b>' + fmt(rows.length) + '</b> rows to import from sheet "' + esc($('#im-sheet').value) + '".</div>';
+  }
+
+  $('#im-file').onchange = function () {
+    var file = this.files[0]; if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        wb = XLSX.read(new Uint8Array(reader.result), { type: 'array', cellDates: true });
+        var names = wb.SheetNames;
+        var guess = names.filter(function (n) { return /ward register/i.test(n) && kind === 'wards' || /movement/i.test(n) && kind === 'movements'; })[0] || names[0];
+        $('#im-sheet').innerHTML = names.map(function (n) { return '<option' + (n === guess ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('');
+        $('#im-sheet-wrap').classList.toggle('hidden', names.length < 2);
+        $('#im-sheet').onchange = parse;
+        parse();
+      } catch (e) { $('#im-info').innerHTML = '<div class="note err">Could not read that file: ' + esc(e.message) + '</div>'; }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  $('#im-go').onclick = function () {
+    if (!parsed) return;
+    var btn = this; btn.disabled = true;
+    var chunks = [], size = 400;
+    for (var i = 0; i < parsed.length; i += size) chunks.push(parsed.slice(i, i + size));
+    var added = 0, updated = 0, errors = [];
+    var step = function (i) {
+      if (i >= chunks.length) {
+        $('#im-info').innerHTML = '<div class="note ' + (errors.length ? 'warn' : 'ok') + '">Added <b>' + fmt(added) + '</b>' +
+          (kind === 'wards' ? ', updated <b>' + fmt(updated) + '</b>' : '') + '. ' +
+          (errors.length ? fmt(errors.length) + ' rows were skipped:<ul style="margin:6px 0 0;padding-left:18px;max-height:180px;overflow:auto">' +
+            errors.slice(0, 200).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>' : 'No problems found.') + '</div>';
+        load();
+        return;
+      }
+      $('#im-info').innerHTML = '<div class="note info">Importing… part ' + (i + 1) + ' of ' + chunks.length + '</div>';
+      call(cfg.action, { rows: chunks[i] }).then(function (r) {
+        added += r.added; updated += r.updated || 0; errors = errors.concat(r.errors);
+        step(i + 1);
+      }).catch(function (e) { $('#im-info').innerHTML = '<div class="note err">' + esc(e.message) + '</div>'; btn.disabled = false; });
+    };
+    step(0);
+  };
+}
+
+/* ---------------- Excel export ---------------- */
+function exportExcel() {
+  if (typeof XLSX === 'undefined') return toast('The Excel tool did not load. Check your internet connection and reload.', 'err');
+  var NUMH = ['Head Count', 'Cards Ordered', 'Received from Production', 'Distributed to Field', 'Damaged / Lost', 'Still at Production', 'In Store (balance)', 'Coverage (% distributed)'];
+  var nums = function (r) { return [r.head, r.ordered, r.received, r.distributed, r.damaged, r.atProduction, r.inStore, Math.round(r.coverage * 1000) / 10]; };
+  var t = total(S.rows);
+  var wb = XLSX.utils.book_new();
+  var add = function (name, aoa, widths) {
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = widths.map(function (w) { return { wch: w }; });
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  };
+  add('Dashboard', [
+    ['Card Department: National Card Tracking'], ['Exported ' + new Date().toLocaleString('en-NG') + ' by ' + S.user.fullName + '. Approved movements only.'], [],
+    ['Measure', 'Figure'], ['Total head count', t.head], ['Wards registered', t.wards], ['Cards ordered (sent to production)', t.ordered],
+    ['Cards received from production', t.received], ['Cards distributed to field', t.distributed], ['Cards damaged / lost', t.damaged],
+    ['Still at production', t.atProduction], ['In store (balance)', t.inStore], ['Coverage (% of head count distributed)', Math.round(t.coverage * 1000) / 10],
+    ['Movements waiting for approval', S.pendingCount]
+  ], [42, 16]);
+  var st = stateRows();
+  add('State Summary', [['State', 'Capital'].concat(NUMH)].concat(st.map(function (r) { return [r.state, r.capital].concat(nums(r)); }))
+    .concat([['Total', ''].concat(nums(total(st)))]), [16, 16, 12, 14, 14, 14, 14, 14, 14, 14]);
+  var sortBy = function (a, b) { return [a.state, a.lga, a.community, a.ward].join('|').localeCompare([b.state, b.lga, b.community, b.ward].join('|')); };
+  add('LGA Summary', [['State', 'LGA'].concat(NUMH)].concat(rollup(S.rows, ['state', 'lga']).sort(sortBy).map(function (r) { return [r.state, r.lga].concat(nums(r)); })),
+    [16, 20, 12, 14, 14, 14, 14, 14, 14, 14]);
+  add('Community Summary', [['State', 'LGA', 'Community'].concat(NUMH)].concat(rollup(S.rows, ['state', 'lga', 'community']).sort(sortBy).map(function (r) { return [r.state, r.lga, r.community].concat(nums(r)); })),
+    [16, 20, 20, 12, 14, 14, 14, 14, 14, 14, 14]);
+  add('Ward Register', [['Ward ID', 'State', 'LGA', 'Community', 'Ward'].concat(NUMH)].concat(S.rows.slice().sort(sortBy).map(function (r) { return [r.id, r.state, r.lga, r.community, r.ward].concat(nums(r)); })),
+    [18, 16, 20, 20, 22, 12, 14, 14, 14, 14, 14, 14, 14]);
+  add('Movements Log', [['Movement ID', 'Date', 'Reference No.', 'Ward ID', 'State', 'LGA', 'Community', 'Ward', 'Movement Type', 'Quantity', 'Officer (handled by)', 'Entered By', 'Entered At', 'Status', 'Approved By', 'Approved At', 'Remarks', 'Status Note']]
+    .concat(S.data.movements.map(function (m) {
+      var w = S.byId[m.wardId] || {};
+      return [m.id, m.date, m.reference, m.wardId, w.state || '', w.lga || '', w.community || '', w.ward || '', m.type, m.quantity, m.officer, m.recordedBy, m.recordedAt, m.status, m.approvedBy, m.approvedAt, m.remarks, m.note];
+    })), [12, 11, 16, 18, 12, 16, 16, 18, 24, 10, 20, 14, 18, 10, 20, 18, 30, 30]);
+  XLSX.writeFile(wb, 'Card_Tracking_' + today() + '.xlsx');
+  toast('Excel file downloaded.');
+}
+
+/* ---------------- start ---------------- */
+(function start() {
+  S.token = store('ct_token');
+  call('status').then(function (st) {
+    if (st.needsSetup) return renderSetup();
+    if (!S.token) return renderLogin();
+    return call('getData').then(function (d) { S.data = d; S.user = d.user; compute(); renderShell(); })
+      .catch(function () { renderLogin(); });
+  }).catch(function (e) {
+    $('#app').innerHTML = '<div class="login-wrap"><div class="card login"><div class="note err">' + esc(e.message) + '</div></div></div>';
+  });
+})();
+</script>
+</body>
+</html>
