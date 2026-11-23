@@ -20,6 +20,7 @@ Google Apps Script web app attached to a private Google Sheet (the database). No
 |---|---|
 | `Code.gs` | Server side: data, rules, logins, audit trail |
 | `Index.html` | The web page the staff use |
+| `Card_Tracking_Preview.html` | A preview copy that runs on your own computer: download it and double-click. Data stays in that browser. |
 | `SETUP_GUIDE.md` | Step-by-step setup in plain language (about 15 minutes) |
 | `docs/Card_Tracking_Sample.xlsx` | Sample data you can import to try the app |
 
