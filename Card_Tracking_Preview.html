@@ -102,17 +102,17 @@ var GAS = (function () {
   };
   var HtmlService = {}, Logger = { log: function () {} };
 /**
- * Card Tracking — Card Department web app
+ * Card Tracking: Card Department web app
  * ---------------------------------------------------------------
  * Runs on Google Apps Script, attached to a Google Sheet.
  * The Google Sheet is the database. Each tab is one table:
  *   Users, States, Ward Register, Movements Log, Audit Trail
  *
  * Roles
- *   admin   – records movements (approved at once), approves or rejects
+ *   admin:   records movements (approved at once), approves or rejects
  *             movements recorded by officers, manages wards and users.
- *   officer – records movements (they wait for an admin's approval).
- *   viewer  – can see everything and export to Excel, cannot change data.
+ *   officer: records movements (they wait for an admin's approval).
+ *   viewer:  can see everything and export to Excel, cannot change data.
  *
  * Only APPROVED movements count in totals. Nothing is ever deleted:
  * a wrong approved movement is "voided" with a reason, and every
@@ -892,7 +892,7 @@ h2{font-size:18px} h3{font-size:15px}
 .tabs{display:flex;gap:2px;padding:0 12px;background:var(--surface);border-bottom:1px solid var(--border);overflow-x:auto}
 .tab{border:0;background:none;padding:12px 12px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;white-space:nowrap;font-weight:500}
 .tab.active{color:var(--primary);border-bottom-color:var(--primary)}
-.badge{display:inline-block;min-width:18px;padding:0 6px;border-radius:9px;background:var(--warn);color:#fff;font-size:11px;line-height:18px;text-align:center;margin-left:4px}
+.badge{display:inline-block;min-width:18px;padding:0 6px;border-radius:4px;background:var(--warn);color:#fff;font-size:11px;line-height:18px;text-align:center;margin-left:4px}
 main{max-width:1280px;margin:0 auto;padding:16px}
 
 /* basics */
@@ -931,7 +931,7 @@ th{background:var(--surface-2);font-size:12px;font-weight:600;color:var(--muted)
 tbody tr:hover{background:#fafcfb}
 tr.click{cursor:pointer}
 tfoot td{font-weight:700;background:var(--surface-2)}
-.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;white-space:nowrap}
 .pill.Approved{background:var(--primary-soft);color:var(--primary)}
 .pill.Pending{background:var(--warn-soft);color:var(--warn)}
 .pill.Rejected,.pill.Voided{background:var(--danger-soft);color:var(--danger)}
@@ -967,8 +967,7 @@ tfoot td{font-weight:700;background:var(--surface-2)}
 .modal .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:calc(100% - 32px);max-width:520px}
 #toast .note{box-shadow:0 4px 14px rgba(0,0,0,.15);pointer-events:auto}
-.loading{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,transparent,var(--primary),transparent);background-size:200% 100%;animation:ld 1s linear infinite;z-index:70}
-@keyframes ld{from{background-position:200% 0}to{background-position:-200% 0}}
+.loading{position:fixed;top:0;left:0;right:0;height:3px;background:var(--primary);opacity:.6;z-index:70}
 
 @media (max-width:900px){
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -995,7 +994,7 @@ tfoot td{font-weight:700;background:var(--surface-2)}
 
 <script>
 /* =====================================================================
- * Card Tracking – browser side
+ * Card Tracking: browser side
  * ===================================================================== */
 var TYPES = ['Sent to Production', 'Received from Production', 'Distributed to Field', 'Damaged / Lost'];
 var TYPE_COLOR = {
@@ -1484,9 +1483,9 @@ function recordFormHtml() {
     '<div class="field"><label for="r-qty">Quantity (cards)</label><input id="r-qty" type="number" min="1" step="1" required value="' + esc(F.quantity || '') + '"></div>' +
     '<div class="field"><label for="r-ref">Reference / document no.</label><input id="r-ref" placeholder="e.g. waybill or delivery note" value="' + esc(F.reference || '') + '"></div>' +
     '<div class="field"><label for="r-state">State</label>' + sel('r-state', [['', 'Choose state']].concat(sortAlpha(statesWithWards).map(function (s) { return [s, s]; })), F.state) + '</div>' +
-    '<div class="field"><label for="r-lga">LGA</label>' + sel('r-lga', [['', F.state ? 'Choose LGA' : '—']].concat(lgas.map(function (s) { return [s, s]; })), F.lga) + '</div>' +
-    '<div class="field"><label for="r-comm">Community</label>' + sel('r-comm', [['', F.lga ? 'Choose community' : '—']].concat(comms.map(function (s) { return [s, s]; })), F.community) + '</div>' +
-    '<div class="field"><label for="r-ward">Ward</label>' + sel('r-ward', [['', F.community ? 'Choose ward' : '—']].concat(wards.map(function (r) { return [r.id, r.ward + ' (' + r.id + ')']; })), F.wardId) + '</div>' +
+    '<div class="field"><label for="r-lga">LGA</label>' + sel('r-lga', [['', F.state ? 'Choose LGA' : 'Choose a state first']].concat(lgas.map(function (s) { return [s, s]; })), F.lga) + '</div>' +
+    '<div class="field"><label for="r-comm">Community</label>' + sel('r-comm', [['', F.lga ? 'Choose community' : 'Choose an LGA first']].concat(comms.map(function (s) { return [s, s]; })), F.community) + '</div>' +
+    '<div class="field"><label for="r-ward">Ward</label>' + sel('r-ward', [['', F.community ? 'Choose ward' : 'Choose a community first']].concat(wards.map(function (r) { return [r.id, r.ward + ' (' + r.id + ')']; })), F.wardId) + '</div>' +
     bal +
     '<div class="field"><label for="r-off">Officer (handled by)</label><input id="r-off" required value="' + esc(F.officer) + '"></div>' +
     '<div class="field span2"><label for="r-rem">Remarks</label><input id="r-rem" placeholder="Optional. Required for damaged / lost" value="' + esc(F.remarks || '') + '"></div>' +

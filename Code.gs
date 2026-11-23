@@ -1,15 +1,15 @@
 /**
- * Card Tracking — Card Department web app
+ * Card Tracking: Card Department web app
  * ---------------------------------------------------------------
  * Runs on Google Apps Script, attached to a Google Sheet.
  * The Google Sheet is the database. Each tab is one table:
  *   Users, States, Ward Register, Movements Log, Audit Trail
  *
  * Roles
- *   admin   – records movements (approved at once), approves or rejects
+ *   admin:   records movements (approved at once), approves or rejects
  *             movements recorded by officers, manages wards and users.
- *   officer – records movements (they wait for an admin's approval).
- *   viewer  – can see everything and export to Excel, cannot change data.
+ *   officer: records movements (they wait for an admin's approval).
+ *   viewer:  can see everything and export to Excel, cannot change data.
  *
  * Only APPROVED movements count in totals. Nothing is ever deleted:
  * a wrong approved movement is "voided" with a reason, and every
