@@ -145,9 +145,9 @@ var TYPE_COLOR = {
 };
 var S = {
   token: null, user: null, data: null, view: 'dashboard',
-  sum: { level: 'state', state: '', lga: '', community: '', q: '' },
+  sum: { level: 'state', state: '', lga: '', q: '', limit: 300 },
   mv: { q: '', type: '', status: '', state: '', from: '', to: '', limit: 200 },
-  wd: { q: '', state: '', limit: 300 },
+  wd: { q: '', state: '', lga: '', limit: 300 },
   form: {}, users: null, audit: null
 };
 
@@ -167,7 +167,7 @@ function $(sel) { return document.querySelector(sel); }
 function store(k, v) { try { if (v === undefined) return sessionStorage.getItem(k); if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { return null; } }
 function isAdmin() { return S.user && S.user.role === 'admin'; }
 function canRecord() { return S.user && (S.user.role === 'admin' || S.user.role === 'officer'); }
-function uniq(a) { return a.filter(function (x, i) { return a.indexOf(x) === i; }); }
+function uniq(a) { var seen = {}; return a.filter(function (x) { var k = '~' + x; if (seen[k]) return false; seen[k] = 1; return true; }); }
 function sortAlpha(a) { return a.slice().sort(function (x, y) { return String(x).localeCompare(String(y)); }); }
 
 function toast(msg, kind) {
@@ -404,25 +404,28 @@ function leg(color, label, v) {
 }
 
 /* ---------------- Totals by area ---------------- */
-var LEVELS = [['state', 'State'], ['lga', 'LGA'], ['community', 'Community'], ['ward', 'Ward']];
+var LEVELS = [['state', 'State'], ['lga', 'LGA'], ['ward', 'Ward']];
+
+function commList(r) { return String(r.communities || '').split(/\s*;\s*/).filter(Boolean); }
 
 function sumTable(rows, level, withCapital) {
   var nameCols = {
     state: [['state', 'State']].concat(withCapital ? [['capital', 'Capital']] : []),
     lga: [['state', 'State'], ['lga', 'LGA']],
-    community: [['state', 'State'], ['lga', 'LGA'], ['community', 'Community']],
-    ward: [['id', 'Ward ID'], ['lga', 'LGA'], ['community', 'Community'], ['ward', 'Ward']]
+    ward: [['id', 'Ward ID'], ['lga', 'LGA'], ['ward', 'Ward'], ['ncomm', 'Communities']]
   }[level];
   var t = total(rows);
   var drill = level !== 'ward';
   var h = '<div class="table-wrap"><table><thead><tr>' +
-    nameCols.map(function (c) { return '<th>' + c[1] + '</th>'; }).join('') +
+    nameCols.map(function (c) { return '<th' + (c[0] === 'ncomm' ? ' class="num"' : '') + '>' + c[1] + '</th>'; }).join('') +
     '<th class="num">Head count</th><th class="num">Ordered</th><th class="num">Received</th><th class="num">Distributed</th>' +
     '<th class="num">Damaged / lost</th><th class="num">Still at production</th><th class="num">In store</th><th>Coverage</th></tr></thead><tbody>';
   if (!rows.length) h += '<tr><td colspan="' + (nameCols.length + 8) + '" class="muted">Nothing to show.</td></tr>';
   rows.forEach(function (r) {
-    h += '<tr' + (drill ? ' class="click" data-drill="' + esc(JSON.stringify({ state: r.state, lga: r.lga || '', community: r.community || '' })) + '"' : '') + '>' +
-      nameCols.map(function (c) { return '<td>' + esc(r[c[0]]) + '</td>'; }).join('') + numCells(r) + '</tr>';
+    h += '<tr' + (drill ? ' class="click" data-drill="' + esc(JSON.stringify({ state: r.state, lga: r.lga || '' })) + '"' : '') + '>' +
+      nameCols.map(function (c) {
+        return c[0] === 'ncomm' ? '<td class="num">' + fmt(commList(r).length) + '</td>' : '<td>' + esc(r[c[0]]) + '</td>';
+      }).join('') + numCells(r) + '</tr>';
   });
   h += '</tbody><tfoot><tr><td colspan="' + nameCols.length + '">Total</td>' + numCells(t) + '</tr></tfoot></table></div>';
   return h;
@@ -436,8 +439,8 @@ function bindDrill(el, level) {
   el.querySelectorAll('tr[data-drill]').forEach(function (tr) {
     tr.onclick = function () {
       var d = JSON.parse(tr.dataset.drill);
-      var next = { state: 'lga', lga: 'community', community: 'ward' }[level];
-      S.sum = { level: next, state: d.state, lga: next === 'lga' ? '' : d.lga, community: next === 'ward' ? d.community : '', q: '' };
+      var next = { state: 'lga', lga: 'ward' }[level];
+      S.sum = { level: next, state: d.state, lga: next === 'ward' ? d.lga : '', q: '', limit: 300 };
       S.view = 'summary'; renderShell();
     };
   });
@@ -445,30 +448,29 @@ function bindDrill(el, level) {
 
 function viewSummary(el) {
   var f = S.sum;
-  var rows = S.rows.filter(function (r) {
-    return (!f.state || r.state === f.state) && (!f.lga || r.lga === f.lga) && (!f.community || r.community === f.community);
-  });
+  if (!f.limit) f.limit = 300;
+  var rows = S.rows.filter(function (r) { return (!f.state || r.state === f.state) && (!f.lga || r.lga === f.lga); });
   var list;
   if (f.level === 'state') list = stateRows().filter(function (r) { return !f.state || r.state === f.state; });
   else if (f.level === 'lga') list = rollup(rows, ['state', 'lga']);
-  else if (f.level === 'community') list = rollup(rows, ['state', 'lga', 'community']);
   else list = rows;
   if (f.q) {
     var q = f.q.toLowerCase();
-    list = list.filter(function (r) { return [r.state, r.lga, r.community, r.ward, r.id].join(' ').toLowerCase().indexOf(q) >= 0; });
+    list = list.filter(function (r) {
+      return [r.state, r.lga, r.ward, r.id, f.level === 'ward' ? r.communities : ''].join(' ').toLowerCase().indexOf(q) >= 0;
+    });
   }
   if (f.level !== 'state') list = list.slice().sort(function (a, b) {
-    return [a.state, a.lga, a.community, a.ward].join('|').localeCompare([b.state, b.lga, b.community, b.ward].join('|'));
+    return [a.state, a.lga, a.ward].join('|').localeCompare([b.state, b.lga, b.ward].join('|'));
   });
+  var shown = f.level === 'ward' ? list.slice(0, f.limit) : list;
 
   var states = S.data.states.map(function (s) { return s.state; });
   var lgas = sortAlpha(uniq(S.rows.filter(function (r) { return !f.state || r.state === f.state; }).map(function (r) { return r.lga; })));
-  var comms = sortAlpha(uniq(S.rows.filter(function (r) { return (!f.state || r.state === f.state) && (!f.lga || r.lga === f.lga); }).map(function (r) { return r.community; })));
 
   var crumbs = '<div class="crumbs"><a data-c="nat">Nigeria</a>' +
     (f.state ? ' › <a data-c="state">' + esc(f.state) + (S.capital[f.state] ? ' (capital: ' + esc(S.capital[f.state]) + ')' : '') + '</a>' : '') +
-    (f.lga ? ' › <a data-c="lga">' + esc(f.lga) + ' LGA</a>' : '') +
-    (f.community ? ' › <span>' + esc(f.community) + '</span>' : '') + '</div>';
+    (f.lga ? ' › <span>' + esc(f.lga) + ' LGA</span>' : '') + '</div>';
 
   el.innerHTML = '<div class="card"><div class="card-head"><h2>Totals by area</h2>' +
     '<span class="muted">Only approved movements are counted</span></div>' + crumbs +
@@ -476,21 +478,25 @@ function viewSummary(el) {
     sel('f-level', LEVELS.map(function (l) { return [l[0], 'Show by ' + l[1]]; }), f.level) +
     sel('f-state', [['', 'All states']].concat(states.map(function (s) { return [s, s]; })), f.state) +
     sel('f-lga', [['', 'All LGAs']].concat(lgas.map(function (s) { return [s, s]; })), f.lga) +
-    sel('f-comm', [['', 'All communities']].concat(comms.map(function (s) { return [s, s]; })), f.community) +
-    '<input id="f-q" placeholder="Search names or ward ID" value="' + esc(f.q) + '">' +
-    '</div>' + sumTable(list, f.level, true) + '</div>';
+    '<input id="f-q" placeholder="Search LGA, ward, community or ward ID" value="' + esc(f.q) + '">' +
+    '</div>' + sumTable(shown, f.level, true) +
+    (list.length > shown.length ? '<div style="margin-top:10px"><span class="muted">Showing ' + fmt(shown.length) + ' of ' + fmt(list.length) +
+      ' wards (the total row covers all of them). </span><button class="btn" id="f-more">Show more</button></div>' : '') + '</div>';
+  if (list.length > shown.length) {
+    var tf = el.querySelector('tfoot tr');
+    tf.innerHTML = '<td colspan="4">Total</td>' + numCells(total(list));
+  }
 
-  $('#f-level').onchange = function () { f.level = this.value; renderView(); };
-  $('#f-state').onchange = function () { f.state = this.value; f.lga = ''; f.community = ''; renderView(); };
-  $('#f-lga').onchange = function () { f.lga = this.value; f.community = ''; renderView(); };
-  $('#f-comm').onchange = function () { f.community = this.value; renderView(); };
-  searchBox('#f-q', function (v) { f.q = v; });
+  $('#f-level').onchange = function () { f.level = this.value; f.limit = 300; renderView(); };
+  $('#f-state').onchange = function () { f.state = this.value; f.lga = ''; f.limit = 300; renderView(); };
+  $('#f-lga').onchange = function () { f.lga = this.value; f.limit = 300; renderView(); };
+  if ($('#f-more')) $('#f-more').onclick = function () { f.limit += 300; renderView(); };
+  searchBox('#f-q', function (v) { f.q = v; f.limit = 300; });
   el.querySelectorAll('.crumbs a').forEach(function (a) {
     a.onclick = function () {
       var c = a.dataset.c;
-      if (c === 'nat') S.sum = { level: 'state', state: '', lga: '', community: '', q: '' };
-      if (c === 'state') S.sum = { level: 'lga', state: f.state, lga: '', community: '', q: '' };
-      if (c === 'lga') S.sum = { level: 'community', state: f.state, lga: f.lga, community: '', q: '' };
+      if (c === 'nat') S.sum = { level: 'state', state: '', lga: '', q: '', limit: 300 };
+      if (c === 'state') S.sum = { level: 'lga', state: f.state, lga: '', q: '', limit: 300 };
       renderView();
     };
   });
@@ -528,7 +534,7 @@ function viewMovements(el) {
     if (f.from && m.date < f.from) return false;
     if (f.to && m.date > f.to) return false;
     if (f.q) {
-      var hay = [m.id, m.reference, m.wardId, w.lga, w.community, w.ward, m.officer, m.approvedBy, m.remarks].join(' ').toLowerCase();
+      var hay = [m.id, m.reference, m.wardId, w.lga, m.community, w.ward, m.officer, m.approvedBy, m.remarks].join(' ').toLowerCase();
       if (hay.indexOf(f.q.toLowerCase()) < 0) return false;
     }
     return true;
@@ -557,7 +563,7 @@ function viewMovements(el) {
       if (isAdmin() && m.status === 'Pending') act = '<button class="btn sm primary" data-ap="' + esc(m.id) + '">Approve</button> <button class="btn sm danger" data-rj="' + esc(m.id) + '">Reject</button>';
       if (isAdmin() && m.status === 'Approved') act = '<button class="btn sm danger" data-vd="' + esc(m.id) + '">Void</button>';
       return '<tr><td style="white-space:nowrap">' + esc(m.date) + '</td><td style="white-space:nowrap"><b>' + esc(m.id) + '</b>' + (m.reference ? '<br><span class="muted">' + esc(m.reference) + '</span>' : '') + '</td>' +
-        '<td>' + esc(w.ward || m.wardId) + '<br><span class="muted">' + esc([w.community, w.lga, w.state].filter(Boolean).join(', ')) + '</span></td>' +
+        '<td>' + esc(w.ward || m.wardId) + (m.community ? ' <span class="muted">(' + esc(m.community) + ')</span>' : '') + '<br><span class="muted">' + esc([w.lga, w.state].filter(Boolean).join(', ')) + '</span></td>' +
         '<td style="white-space:nowrap"><span class="type-dot" style="background:' + TYPE_COLOR[m.type] + '"></span>' + esc(m.type) + '</td>' +
         '<td class="num">' + fmt(m.quantity) + '</td><td>' + esc(m.officer) + '<br><span class="muted">entered by ' + esc(m.recordedBy) + '</span></td>' +
         '<td><span class="pill ' + esc(m.status) + '">' + esc(m.status) + '</span></td>' +
@@ -599,18 +605,18 @@ function recordFormHtml() {
   if (!F.type) F.type = TYPES[2];
   if (F.officer === undefined) F.officer = S.user.fullName;
   var lgas = sortAlpha(uniq(S.rows.filter(function (r) { return r.state === F.state; }).map(function (r) { return r.lga; })));
-  var comms = sortAlpha(uniq(S.rows.filter(function (r) { return r.state === F.state && r.lga === F.lga; }).map(function (r) { return r.community; })));
-  var wards = S.rows.filter(function (r) { return r.state === F.state && r.lga === F.lga && r.community === F.community; })
+  var wards = S.rows.filter(function (r) { return r.state === F.state && r.lga === F.lga; })
     .sort(function (a, b) { return a.ward.localeCompare(b.ward); });
   var statesWithWards = uniq(S.rows.map(function (r) { return r.state; }));
   var w = F.wardId ? S.byId[F.wardId] : null;
+  var comms = w ? sortAlpha(commList(w)) : [];
   var bal = '';
   if (w) {
     var hint = '';
     if (F.type === TYPES[1]) hint = 'You can receive up to <b>' + fmt(w.atProduction) + '</b> more cards for this ward.';
     if (F.type === TYPES[2] || F.type === TYPES[3]) hint = 'You can ' + (F.type === TYPES[2] ? 'distribute' : 'write off') + ' up to <b>' + fmt(w.inStore) + '</b> cards (the in-store balance).';
     if (F.type === TYPES[0]) hint = 'Head count still not ordered for: <b>' + fmt(Math.max(0, w.head - w.ordered)) + '</b>.';
-    bal = '<div class="span2" style="grid-column:1/-1"><div class="muted" style="font-size:12px;font-weight:600">Current balance for ' + esc(w.ward) + ' (' + esc(w.id) + ')</div>' +
+    bal = '<div style="grid-column:1/-1"><div class="muted" style="font-size:12px;font-weight:600">Current balance for ' + esc(w.ward) + ' ward (' + esc(w.id) + ')</div>' +
       '<div class="balance"><div>Head count<b>' + fmt(w.head) + '</b></div><div>Ordered<b>' + fmt(w.ordered) + '</b></div>' +
       '<div>Still at production<b>' + fmt(w.atProduction) + '</b></div><div>In store<b>' + fmt(w.inStore) + '</b></div>' +
       '<div>Distributed<b>' + fmt(w.distributed) + '</b></div></div>' +
@@ -626,8 +632,8 @@ function recordFormHtml() {
     '<div class="field"><label for="r-ref">Reference / document no.</label><input id="r-ref" placeholder="e.g. waybill or delivery note" value="' + esc(F.reference || '') + '"></div>' +
     '<div class="field"><label for="r-state">State</label>' + sel('r-state', [['', 'Choose state']].concat(sortAlpha(statesWithWards).map(function (s) { return [s, s]; })), F.state) + '</div>' +
     '<div class="field"><label for="r-lga">LGA</label>' + sel('r-lga', [['', F.state ? 'Choose LGA' : 'Choose a state first']].concat(lgas.map(function (s) { return [s, s]; })), F.lga) + '</div>' +
-    '<div class="field"><label for="r-comm">Community</label>' + sel('r-comm', [['', F.lga ? 'Choose community' : 'Choose an LGA first']].concat(comms.map(function (s) { return [s, s]; })), F.community) + '</div>' +
-    '<div class="field"><label for="r-ward">Ward</label>' + sel('r-ward', [['', F.community ? 'Choose ward' : 'Choose a community first']].concat(wards.map(function (r) { return [r.id, r.ward + ' (' + r.id + ')']; })), F.wardId) + '</div>' +
+    '<div class="field"><label for="r-ward">Ward</label>' + sel('r-ward', [['', F.lga ? 'Choose ward' : 'Choose an LGA first']].concat(wards.map(function (r) { return [r.id, r.ward + ' (' + r.id + ')']; })), F.wardId) + '</div>' +
+    '<div class="field"><label for="r-comm">Community (optional)</label>' + sel('r-comm', [['', w ? (comms.length ? 'Whole ward / not specified' : 'No communities listed') : 'Choose a ward first']].concat(comms.map(function (c) { return [c, c]; })), F.community) + '</div>' +
     bal +
     '<div class="field"><label for="r-off">Officer (handled by)</label><input id="r-off" required value="' + esc(F.officer) + '"></div>' +
     '<div class="field span2"><label for="r-rem">Remarks</label><input id="r-rem" placeholder="Optional. Required for damaged / lost" value="' + esc(F.remarks || '') + '"></div>' +
@@ -640,20 +646,20 @@ function bindRecordForm() {
   var keep = function () {
     F.type = $('#r-type').value; F.date = $('#r-date').value; F.quantity = $('#r-qty').value;
     F.reference = $('#r-ref').value; F.officer = $('#r-off').value; F.remarks = $('#r-rem').value;
+    F.community = $('#r-comm').value;
   };
   var redraw = function () { keep(); $('#rec-card').innerHTML = recordFormHtml(); bindRecordForm(); };
   $('#r-type').onchange = redraw;
-  $('#r-state').onchange = function () { F.state = this.value; F.lga = F.community = F.wardId = ''; redraw(); };
-  $('#r-lga').onchange = function () { F.lga = this.value; F.community = F.wardId = ''; redraw(); };
-  $('#r-comm').onchange = function () { F.community = this.value; F.wardId = ''; redraw(); };
-  $('#r-ward').onchange = function () { F.wardId = this.value; redraw(); };
+  $('#r-state').onchange = function () { F.state = this.value; F.lga = F.wardId = ''; $('#r-comm').value = ''; redraw(); };
+  $('#r-lga').onchange = function () { F.lga = this.value; F.wardId = ''; $('#r-comm').value = ''; redraw(); };
+  $('#r-ward').onchange = function () { F.wardId = this.value; $('#r-comm').value = ''; redraw(); };
   $('#f-rec').onsubmit = function (e) {
     e.preventDefault(); keep();
-    if (!F.wardId) return toast('Choose the state, LGA, community and ward.', 'err');
+    if (!F.wardId) return toast('Choose the state, LGA and ward.', 'err');
     if (F.type === TYPES[3] && !F.remarks.trim()) return toast('Please write a remark explaining the damage or loss.', 'err');
     var btn = this.querySelector('button[type=submit]'); btn.disabled = true;
     call('recordMovement', {
-      date: F.date, type: F.type, quantity: Number(F.quantity), wardId: F.wardId,
+      date: F.date, type: F.type, quantity: Number(F.quantity), wardId: F.wardId, community: F.community,
       reference: F.reference, officer: F.officer, remarks: F.remarks
     }).then(function (r) {
       toast(r.id + ' saved' + (r.status === 'Pending' ? '. It is waiting for approval.' : ' and approved.'));
@@ -666,52 +672,73 @@ function bindRecordForm() {
 /* ---------------- Ward register ---------------- */
 function viewWards(el) {
   var f = S.wd;
+  var lgas = sortAlpha(uniq(S.rows.filter(function (r) { return !f.state || r.state === f.state; }).map(function (r) { return r.lga; })));
+  if (f.lga && lgas.indexOf(f.lga) < 0) f.lga = '';
+  var q = (f.q || '').toLowerCase();
   var list = S.rows.filter(function (r) {
     if (f.state && r.state !== f.state) return false;
-    if (f.q && [r.id, r.lga, r.community, r.ward].join(' ').toLowerCase().indexOf(f.q.toLowerCase()) < 0) return false;
+    if (f.lga && r.lga !== f.lga) return false;
+    if (q && [r.id, r.lga, r.ward, r.communities].join(' ').toLowerCase().indexOf(q) < 0) return false;
     return true;
-  }).sort(function (a, b) { return [a.state, a.lga, a.community, a.ward].join('|').localeCompare([b.state, b.lga, b.community, b.ward].join('|')); });
-  el.innerHTML = '<div class="card"><div class="card-head"><h2>Ward register</h2><span class="muted">' + fmt(list.length) + ' wards</span>' +
+  }).sort(function (a, b) { return [a.state, a.lga, a.ward].join('|').localeCompare([b.state, b.lga, b.ward].join('|')); });
+  var nComm = list.reduce(function (a, r) { return a + commList(r).length; }, 0);
+  el.innerHTML = '<div class="card"><div class="card-head"><h2>Ward register</h2><span class="muted">' + fmt(list.length) + ' wards, ' + fmt(nComm) + ' communities</span>' +
     (isAdmin() ? '<button class="btn primary" id="w-add">Add ward</button><button class="btn" id="w-import">Import wards from Excel</button>' : '') + '</div>' +
-    '<p class="muted" style="margin-top:0">The lowest level: State › LGA › Community › Ward. Head count is entered per ward and adds up to every level above it.</p>' +
-    '<div class="filters"><input id="w-q" placeholder="Search ward ID, LGA, community, ward" value="' + esc(f.q) + '">' +
-    sel('w-state', [['', 'All states']].concat(S.data.states.map(function (s) { return [s.state, s.state]; })), f.state) + '</div>' +
-    '<div class="table-wrap"><table><thead><tr><th>Ward ID</th><th>State</th><th>LGA</th><th>Community</th><th>Ward</th>' +
+    '<p class="muted" style="margin-top:0">State › LGA › Ward › Community. Head count and card movements are kept per ward and add up to every level above it. Each ward lists the communities in it.</p>' +
+    '<div class="filters"><input id="w-q" placeholder="Search ward, LGA, community or ward ID" value="' + esc(f.q) + '">' +
+    sel('w-state', [['', 'All states']].concat(S.data.states.map(function (s) { return [s.state, s.state]; })), f.state) +
+    sel('w-lga', [['', 'All LGAs']].concat(lgas.map(function (s) { return [s, s]; })), f.lga) + '</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Ward ID</th><th>State</th><th>LGA</th><th>Ward</th><th>Communities</th>' +
     '<th class="num">Head count</th><th class="num">Distributed</th><th class="num">In store</th><th>Coverage</th>' + (isAdmin() ? '<th></th>' : '') + '</tr></thead><tbody>' +
-    (list.length ? '' : '<tr><td colspan="10" class="muted">No wards yet.</td></tr>') +
+    (list.length ? '' : '<tr><td colspan="10" class="muted">No wards found.</td></tr>') +
     list.slice(0, f.limit).map(function (r) {
-      return '<tr><td><b>' + esc(r.id) + '</b></td><td>' + esc(r.state) + '</td><td>' + esc(r.lga) + '</td><td>' + esc(r.community) + '</td><td>' + esc(r.ward) + '</td>' +
+      var cl = commList(r);
+      var match = q ? cl.filter(function (c) { return c.toLowerCase().indexOf(q) >= 0; }) : [];
+      return '<tr><td style="white-space:nowrap"><b>' + esc(r.id) + '</b></td><td>' + esc(r.state) + '</td><td>' + esc(r.lga) + '</td><td>' + esc(r.ward) + '</td>' +
+        '<td>' + (cl.length ? '<button class="btn sm" data-cm="' + esc(r.id) + '">' + fmt(cl.length) + ' listed</button>' : '<span class="muted">None</span>') +
+        (match.length ? '<br><span class="muted">Matches: ' + esc(match.slice(0, 3).join(', ')) + (match.length > 3 ? '…' : '') + '</span>' : '') + '</td>' +
         '<td class="num">' + fmt(r.head) + '</td><td class="num">' + fmt(r.distributed) + '</td><td class="num' + (r.inStore < 0 ? ' neg' : '') + '">' + fmt(r.inStore) + '</td>' +
         '<td><div class="cov"><div class="bar"><i style="width:' + Math.min(100, r.coverage * 100) + '%"></i></div><span>' + pct(r.coverage) + '</span></div></td>' +
         (isAdmin() ? '<td><button class="btn sm" data-ed="' + esc(r.id) + '">Edit</button></td>' : '') + '</tr>';
     }).join('') + '</tbody></table></div>' +
-    (list.length > f.limit ? '<div style="margin-top:10px"><button class="btn" id="w-more">Show more</button></div>' : '') + '</div>';
-  searchBox('#w-q', function (v) { f.q = v; });
-  $('#w-state').onchange = function () { f.state = this.value; renderView(); };
+    (list.length > f.limit ? '<div style="margin-top:10px"><span class="muted">Showing ' + fmt(f.limit) + ' of ' + fmt(list.length) + '. </span><button class="btn" id="w-more">Show more</button></div>' : '') + '</div>';
+  searchBox('#w-q', function (v) { f.q = v; f.limit = 300; });
+  $('#w-state').onchange = function () { f.state = this.value; f.lga = ''; f.limit = 300; renderView(); };
+  $('#w-lga').onchange = function () { f.lga = this.value; f.limit = 300; renderView(); };
   if ($('#w-more')) $('#w-more').onclick = function () { f.limit += 300; renderView(); };
   if ($('#w-add')) $('#w-add').onclick = function () { wardDialog(null); };
   if ($('#w-import')) $('#w-import').onclick = function () { importDialog('wards'); };
   el.querySelectorAll('[data-ed]').forEach(function (b) { b.onclick = function () { wardDialog(S.byId[b.dataset.ed]); }; });
+  el.querySelectorAll('[data-cm]').forEach(function (b) { b.onclick = function () { communitiesDialog(S.byId[b.dataset.cm]); }; });
+}
+
+function communitiesDialog(w) {
+  var cl = sortAlpha(commList(w));
+  openModal('<h2>' + esc(w.ward) + ' ward</h2><p class="muted" style="margin-top:4px">' + esc(w.lga) + ' LGA, ' + esc(w.state) + ' · ' + esc(w.id) + ' · ' + fmt(cl.length) + ' communities</p>' +
+    '<ol style="max-height:50vh;overflow:auto;margin:8px 0 0;padding-left:28px;columns:2;column-gap:24px">' +
+    cl.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ol>' +
+    '<div class="actions"><button type="button" class="btn" data-close>Close</button></div>');
 }
 
 function wardDialog(w) {
-  w = w || { state: S.wd.state || '', lga: '', community: '', ward: '', head: '' };
+  w = w || { state: S.wd.state || '', lga: S.wd.lga || '', ward: '', head: '', communities: '' };
   var lgas = sortAlpha(uniq(S.rows.map(function (r) { return r.lga; })));
-  var comms = sortAlpha(uniq(S.rows.map(function (r) { return r.community; })));
   openModal('<h2>' + (w.id ? 'Edit ward ' + esc(w.id) : 'Add a ward') + '</h2>' +
     '<form id="f-ward" class="grid g2" style="margin-top:12px">' +
     '<div class="field"><label for="wd-state">State</label>' + sel('wd-state', [['', 'Choose state']].concat(S.data.states.map(function (s) { return [s.state, s.state + ' (capital: ' + s.capital + ')']; })), w.state, ' required') + '</div>' +
     '<div class="field"><label for="wd-lga">LGA</label><input id="wd-lga" list="dl-lga" required value="' + esc(w.lga) + '"></div>' +
-    '<div class="field"><label for="wd-comm">Community</label><input id="wd-comm" list="dl-comm" required value="' + esc(w.community) + '"></div>' +
     '<div class="field"><label for="wd-ward">Ward name</label><input id="wd-ward" required value="' + esc(w.ward) + '"></div>' +
     '<div class="field"><label for="wd-head">Head count (people)</label><input id="wd-head" type="number" min="0" step="1" required value="' + esc(w.head) + '"></div>' +
+    '<div class="field span2"><label for="wd-comm">Communities in this ward (one per line)</label><textarea id="wd-comm" rows="8">' + esc(commList(w).join('\n')) + '</textarea></div>' +
     '<datalist id="dl-lga">' + lgas.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
-    '<datalist id="dl-comm">' + comms.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
     '<div id="wd-err" style="grid-column:1/-1"></div>' +
     '<div class="actions" style="grid-column:1/-1;margin-top:0"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">Save ward</button></div></form>');
   $('#f-ward').onsubmit = function (e) {
     e.preventDefault();
-    call('saveWard', { id: w.id || '', state: $('#wd-state').value, lga: $('#wd-lga').value, community: $('#wd-comm').value, ward: $('#wd-ward').value, head: $('#wd-head').value })
+    call('saveWard', {
+      id: w.id || '', state: $('#wd-state').value, lga: $('#wd-lga').value, ward: $('#wd-ward').value, head: $('#wd-head').value,
+      communities: $('#wd-comm').value.split('\n')
+    })
       .then(function (r) { closeModal(); toast('Ward ' + r.id + ' saved.'); return load(); })
       .catch(function (err) { $('#wd-err').innerHTML = '<div class="note err">' + esc(err.message) + '</div>'; });
   };
@@ -813,18 +840,20 @@ function reasonDialog(title, text, action, id) {
 var IMPORT = {
   wards: {
     title: 'Import wards from Excel',
-    help: 'Use a sheet with the columns <b>State, LGA, Community, Ward, Head Count</b> (a <b>Ward ID</b> column is optional). ' +
-      'If a Ward ID already exists, that ward is updated. Otherwise a new ward is added and given an ID.',
-    map: { wardid: 'id', state: 'state', lga: 'lga', community: 'community', ward: 'ward', headcount: 'head' },
-    required: ['state', 'lga', 'community', 'ward', 'head'],
+    help: 'Use a sheet with the columns <b>State, LGA, Ward</b>, and optionally <b>Community</b> (one community per row) and <b>Head Count</b>. ' +
+      'Rows for the same ward are combined. A ward that is already in the register gets any new communities added, and its head count is changed only if the file has one.',
+    map: { wardid: 'id', state: 'state', lga: 'lga', ward: 'ward', community: 'communities', communities: 'communities', headcount: 'head' },
+    required: ['state', 'lga', 'ward'],
+    chunk: 150,
     action: 'importWards'
   },
   movements: {
     title: 'Import movements from Excel',
-    help: 'Use a sheet with the columns <b>Date, Ward ID, Movement Type, Quantity</b> and optionally <b>Reference No., Officer, Approved By, Remarks</b>. ' +
+    help: 'Use a sheet with the columns <b>Date, Ward ID, Movement Type, Quantity</b> and optionally <b>Community, Reference No., Officer, Approved By, Remarks</b>. ' +
       'Imported movements are saved as approved, so only import records that were already checked. Balance checks are not applied to imports.',
-    map: { date: 'date', referenceno: 'reference', reference: 'reference', wardid: 'wardId', movementtype: 'type', type: 'type', quantity: 'quantity', officer: 'officer', approvedby: 'approvedBy', remarks: 'remarks' },
+    map: { date: 'date', referenceno: 'reference', reference: 'reference', wardid: 'wardId', community: 'community', movementtype: 'type', type: 'type', quantity: 'quantity', officer: 'officer', approvedby: 'approvedBy', remarks: 'remarks' },
     required: ['date', 'wardId', 'type', 'quantity'],
+    chunk: 400,
     action: 'importMovements'
   }
 };
@@ -841,6 +870,24 @@ function mapHeader(kind, h) {
   if (k.indexOf('officer') === 0 && map.officer) return 'officer';
   if (k.indexOf('reference') === 0 && map.reference) return 'reference';
   return null;
+}
+/** Combines one-row-per-community lines into one entry per ward. */
+function groupWards(rows) {
+  var map = {}, out = [];
+  rows.forEach(function (r) {
+    var norm = function (v) { return String(v === undefined ? '' : v).replace(/\s+/g, ' ').trim(); };
+    var key = [norm(r.state), norm(r.lga), norm(r.ward)].join('|').toLowerCase();
+    var g = map[key];
+    if (!g) {
+      g = map[key] = { _row: r._row, _first: r._row, _n: 0, id: r.id || '', state: norm(r.state), lga: norm(r.lga), ward: norm(r.ward), communities: [], head: '' };
+      out.push(g);
+    }
+    g._n++;
+    g._row = g._n > 1 ? g._first + ' (and ' + (g._n - 1) + ' more row' + (g._n > 2 ? 's' : '') + ' for this ward)' : g._first;
+    String(r.communities === undefined ? '' : r.communities).split(/\s*;\s*/).forEach(function (c) { c = norm(c); if (c) g.communities.push(c); });
+    if (String(r.head === undefined ? '' : r.head).trim() !== '') g.head = r.head;
+  });
+  return out;
 }
 function cellOut(v) {
   if (v instanceof Date) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
@@ -881,9 +928,12 @@ function importDialog(kind) {
         .every(function (k) { return String(o[k] === undefined ? '' : o[k]).trim() === ''; })) continue;
       rows.push(o);
     }
+    var lineCount = rows.length;
+    if (kind === 'wards') rows = groupWards(rows);
     parsed = rows;
     $('#im-go').disabled = !rows.length;
-    $('#im-info').innerHTML = '<div class="note info">Found <b>' + fmt(rows.length) + '</b> rows to import from sheet "' + esc($('#im-sheet').value) + '".</div>';
+    $('#im-info').innerHTML = '<div class="note info">Found <b>' + fmt(lineCount) + '</b> rows in sheet "' + esc($('#im-sheet').value) + '"' +
+      (kind === 'wards' ? ': <b>' + fmt(rows.length) + '</b> wards with <b>' + fmt(rows.reduce(function (a, r) { return a + r.communities.length; }, 0)) + '</b> communities.' : '.') + '</div>';
   }
 
   $('#im-file').onchange = function () {
@@ -906,14 +956,14 @@ function importDialog(kind) {
   $('#im-go').onclick = function () {
     if (!parsed) return;
     var btn = this; btn.disabled = true;
-    var chunks = [], size = 400;
+    var chunks = [], size = cfg.chunk || 400;
     for (var i = 0; i < parsed.length; i += size) chunks.push(parsed.slice(i, i + size));
     var added = 0, updated = 0, errors = [];
     var step = function (i) {
       if (i >= chunks.length) {
         $('#im-info').innerHTML = '<div class="note ' + (errors.length ? 'warn' : 'ok') + '">Added <b>' + fmt(added) + '</b>' +
           (kind === 'wards' ? ', updated <b>' + fmt(updated) + '</b>' : '') + '. ' +
-          (errors.length ? fmt(errors.length) + ' rows were skipped:<ul style="margin:6px 0 0;padding-left:18px;max-height:180px;overflow:auto">' +
+          (errors.length ? fmt(errors.length) + ' entries were skipped:<ul style="margin:6px 0 0;padding-left:18px;max-height:180px;overflow:auto">' +
             errors.slice(0, 200).map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>' : 'No problems found.') + '</div>';
         load();
         return;
@@ -950,18 +1000,20 @@ function exportExcel() {
   var st = stateRows();
   add('State Summary', [['State', 'Capital'].concat(NUMH)].concat(st.map(function (r) { return [r.state, r.capital].concat(nums(r)); }))
     .concat([['Total', ''].concat(nums(total(st)))]), [16, 16, 12, 14, 14, 14, 14, 14, 14, 14]);
-  var sortBy = function (a, b) { return [a.state, a.lga, a.community, a.ward].join('|').localeCompare([b.state, b.lga, b.community, b.ward].join('|')); };
+  var sortBy = function (a, b) { return [a.state, a.lga, a.ward].join('|').localeCompare([b.state, b.lga, b.ward].join('|')); };
+  var wardsSorted = S.rows.slice().sort(sortBy);
   add('LGA Summary', [['State', 'LGA'].concat(NUMH)].concat(rollup(S.rows, ['state', 'lga']).sort(sortBy).map(function (r) { return [r.state, r.lga].concat(nums(r)); })),
     [16, 20, 12, 14, 14, 14, 14, 14, 14, 14]);
-  add('Community Summary', [['State', 'LGA', 'Community'].concat(NUMH)].concat(rollup(S.rows, ['state', 'lga', 'community']).sort(sortBy).map(function (r) { return [r.state, r.lga, r.community].concat(nums(r)); })),
-    [16, 20, 20, 12, 14, 14, 14, 14, 14, 14, 14]);
-  add('Ward Register', [['Ward ID', 'State', 'LGA', 'Community', 'Ward'].concat(NUMH)].concat(S.rows.slice().sort(sortBy).map(function (r) { return [r.id, r.state, r.lga, r.community, r.ward].concat(nums(r)); })),
-    [18, 16, 20, 20, 22, 12, 14, 14, 14, 14, 14, 14, 14]);
-  add('Movements Log', [['Movement ID', 'Date', 'Reference No.', 'Ward ID', 'State', 'LGA', 'Community', 'Ward', 'Movement Type', 'Quantity', 'Officer (handled by)', 'Entered By', 'Entered At', 'Status', 'Approved By', 'Approved At', 'Remarks', 'Status Note']]
+  add('Ward Register', [['Ward ID', 'State', 'LGA', 'Ward', 'Communities'].concat(NUMH)].concat(wardsSorted.map(function (r) { return [r.id, r.state, r.lga, r.ward, commList(r).length].concat(nums(r)); })),
+    [14, 14, 20, 26, 12, 12, 14, 14, 14, 14, 14, 14, 14]);
+  var commRows = [['Ward ID', 'State', 'LGA', 'Ward', 'Community']];
+  wardsSorted.forEach(function (r) { commList(r).forEach(function (c) { commRows.push([r.id, r.state, r.lga, r.ward, c]); }); });
+  add('Communities', commRows, [14, 14, 20, 26, 34]);
+  add('Movements Log', [['Movement ID', 'Date', 'Reference No.', 'Ward ID', 'State', 'LGA', 'Ward', 'Community', 'Movement Type', 'Quantity', 'Officer (handled by)', 'Entered By', 'Entered At', 'Status', 'Approved By', 'Approved At', 'Remarks', 'Status Note']]
     .concat(S.data.movements.map(function (m) {
       var w = S.byId[m.wardId] || {};
-      return [m.id, m.date, m.reference, m.wardId, w.state || '', w.lga || '', w.community || '', w.ward || '', m.type, m.quantity, m.officer, m.recordedBy, m.recordedAt, m.status, m.approvedBy, m.approvedAt, m.remarks, m.note];
-    })), [12, 11, 16, 18, 12, 16, 16, 18, 24, 10, 20, 14, 18, 10, 20, 18, 30, 30]);
+      return [m.id, m.date, m.reference, m.wardId, w.state || '', w.lga || '', w.ward || '', m.community || '', m.type, m.quantity, m.officer, m.recordedBy, m.recordedAt, m.status, m.approvedBy, m.approvedAt, m.remarks, m.note];
+    })), [12, 11, 16, 14, 12, 16, 22, 22, 24, 10, 20, 14, 18, 10, 20, 18, 30, 30]);
   XLSX.writeFile(wb, 'Card_Tracking_' + today() + '.xlsx');
   toast('Excel file downloaded.');
 }

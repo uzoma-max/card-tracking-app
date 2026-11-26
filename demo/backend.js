@@ -1,6 +1,6 @@
 /* Demo back end: the same rules as Code.gs, running inside the browser.
    Data is saved only in this browser (localStorage). */
-var PREVIEW_KEY = 'card_tracking_preview_v1';
+var PREVIEW_KEY = 'card_tracking_preview_v2';
 var GAS = (function () {
   var store = {};
   try { store = JSON.parse(localStorage.getItem(PREVIEW_KEY) || '{}'); } catch (e) { store = {}; }
@@ -101,11 +101,11 @@ var TABLES = {
   states: { name: 'States', headers: ['State', 'Capital'] },
   wards: {
     name: 'Ward Register',
-    headers: ['Ward ID', 'State', 'LGA', 'Community', 'Ward', 'Head Count', 'Updated By', 'Updated At']
+    headers: ['Ward ID', 'State', 'LGA', 'Ward', 'Communities', 'Head Count', 'Updated By', 'Updated At']
   },
   movements: {
     name: 'Movements Log',
-    headers: ['Movement ID', 'Date', 'Reference No.', 'Ward ID', 'Movement Type', 'Quantity',
+    headers: ['Movement ID', 'Date', 'Reference No.', 'Ward ID', 'Community', 'Movement Type', 'Quantity',
       'Officer (handled by)', 'Recorded By', 'Recorded At', 'Status', 'Approved By',
       'Approved At', 'Remarks', 'Status Note']
   },
@@ -213,8 +213,8 @@ var ACTIONS = {
   getData: function (p, user) {
     var wards = readTable_('wards').map(function (w) {
       return {
-        id: w['Ward ID'], state: w.State, lga: w.LGA, community: w.Community,
-        ward: w.Ward, head: num_(w['Head Count'])
+        id: String(w['Ward ID']), state: w.State, lga: w.LGA, ward: String(w.Ward),
+        communities: String(w.Communities || ''), head: num_(w['Head Count'])
       };
     });
     var movements = readTable_('movements').map(movementOut_);
@@ -240,12 +240,12 @@ var ACTIONS = {
       var id = nextMovementId_();
       var status = isAdmin ? 'Approved' : 'Pending';
       appendRows_('movements', [[
-        id, m.date, m.reference, m.wardId, m.type, m.quantity, m.officer || user.fullName,
+        id, m.date, m.reference, m.wardId, m.community, m.type, m.quantity, m.officer || user.fullName,
         user.username, now_(), status, isAdmin ? user.fullName : '', isAdmin ? now_() : '',
         m.remarks, ''
       ]]);
       audit_(user.username, 'Recorded movement ' + id + ' (' + status + ')',
-        m.type + ', ' + m.quantity + ' cards, ward ' + m.wardId);
+        m.type + ', ' + m.quantity + ' cards, ward ' + m.wardId + (m.community ? ' (' + m.community + ')' : ''));
       return { id: id, status: status };
     });
   },
@@ -308,7 +308,7 @@ var ACTIONS = {
         try {
           var m = validateMovement_(r, wardIds);
           var id = 'MV-' + pad_(startNum + out.length + 1, 5);
-          out.push([id, m.date, m.reference, m.wardId, m.type, m.quantity, m.officer || '',
+          out.push([id, m.date, m.reference, m.wardId, m.community, m.type, m.quantity, m.officer || '',
             user.username, now_(), 'Approved', r.approvedBy ? String(r.approvedBy) : user.fullName, now_(),
             m.remarks, 'Imported from Excel']);
         } catch (e) {
@@ -327,62 +327,79 @@ var ACTIONS = {
     requireRole_(user, ['admin']);
     return withLock_(function () {
       var w = validateWard_(p);
-      var wards = readTable_('wards');
+      var idx = wardIndex_();
+      var clash = idx.byKey[wardKey_(w.state, w.lga, w.ward)];
+      var head = w.head === null ? 0 : w.head;
       if (p.id) {
-        var hit = findRow_('wards', 'Ward ID', p.id);
-        if (!hit) throw new Error('Ward not found.');
-        if (dupWard_(wards, w, p.id)) throw new Error('Another ward already has this name in the same community.');
-        updateRow_('wards', hit.row, {
-          'State': w.state, 'LGA': w.lga, 'Community': w.community, 'Ward': w.ward,
-          'Head Count': w.head, 'Updated By': user.username, 'Updated At': now_()
+        var row = idx.byId[String(p.id)];
+        if (!row) throw new Error('Ward not found.');
+        if (clash && clash !== row) throw new Error('Another ward in this LGA already has this name.');
+        var oldHead = row['Head Count'];
+        updateRow_('wards', row, {
+          'State': w.state, 'LGA': w.lga, 'Ward': w.ward, 'Communities': w.communities.join('; '),
+          'Head Count': head, 'Updated By': user.username, 'Updated At': now_()
         });
-        audit_(user.username, 'Updated ward ' + p.id,
-          'Head count ' + hit.row['Head Count'] + ' -> ' + w.head + '; ' + [w.state, w.lga, w.community, w.ward].join(' / '));
+        audit_(user.username, 'Updated ward ' + p.id, 'Head count ' + oldHead + ' -> ' + head + '; ' +
+          [w.state, w.lga, w.ward].join(' / ') + '; ' + w.communities.length + ' communities');
         return { id: p.id };
       }
-      if (dupWard_(wards, w, null)) throw new Error('This ward already exists in the register.');
-      var id = makeWardId_(wards, w);
-      appendRows_('wards', [[id, w.state, w.lga, w.community, w.ward, w.head, user.username, now_()]]);
-      audit_(user.username, 'Added ward ' + id, [w.state, w.lga, w.community, w.ward, 'head count ' + w.head].join(' / '));
+      if (clash) throw new Error('This ward is already in the register (' + clash['Ward ID'] + ').');
+      var id = newWardId_(idx, w);
+      appendRows_('wards', [[id, w.state, w.lga, w.ward, w.communities.join('; '), head, user.username, now_()]]);
+      audit_(user.username, 'Added ward ' + id, [w.state, w.lga, w.ward, 'head count ' + head, w.communities.length + ' communities'].join(' / '));
       return { id: id };
     });
   },
 
+  /**
+   * rows: [{ id?, state, lga, ward, communities: [..], head? }]
+   * A ward that already exists (same ID, or same state + LGA + ward name) is updated:
+   * new communities are added to its list, and its head count is replaced only when one is given.
+   */
   importWards: function (p, user) {
     requireRole_(user, ['admin']);
     return withLock_(function () {
       var rows = p.rows || [];
-      var wards = readTable_('wards');
-      var byId = {};
-      wards.forEach(function (w, i) { byId[String(w['Ward ID'])] = i; });
-      var errors = [], added = [], updated = 0;
+      var idx = wardIndex_();
+      var errors = [], added = [], changed = [], seen = {};
       rows.forEach(function (r, i) {
         try {
           var w = validateWard_(r);
+          var key = wardKey_(w.state, w.lga, w.ward);
           var givenId = String(r.id || '').trim();
-          if (givenId && byId.hasOwnProperty(givenId)) {
-            var idx = byId[givenId];
-            if (idx === -1) throw new Error('ward ID ' + givenId + ' appears twice in the file');
-            updateRow_('wards', wards[idx], {
-              'State': w.state, 'LGA': w.lga, 'Community': w.community, 'Ward': w.ward,
-              'Head Count': w.head, 'Updated By': user.username, 'Updated At': now_()
-            });
-            updated++;
+          var row = (givenId && idx.byId[givenId]) || idx.byKey[key];
+          if (row && row._new) {
+            // Same ward twice in one batch: just merge into the new row.
+            row.Communities = mergeComms_(splitComms_(row.Communities), w.communities).join('; ');
+            if (w.head !== null) row['Head Count'] = w.head;
             return;
           }
-          if (dupWard_(wards, w, null)) throw new Error('ward already exists (' + w.ward + ')');
-          var id = givenId || makeWardId_(wards, w);
-          var newRow = { 'Ward ID': id, State: w.state, LGA: w.lga, Community: w.community, Ward: w.ward, 'Head Count': w.head };
-          wards.push(newRow);
-          byId[id] = -1; // new in this batch
-          added.push([id, w.state, w.lga, w.community, w.ward, w.head, user.username, now_()]);
+          if (row) {
+            var merged = mergeComms_(splitComms_(row.Communities), w.communities).join('; ');
+            var newHead = w.head === null ? row['Head Count'] : w.head;
+            if (merged !== String(row.Communities || '') || String(newHead) !== String(row['Head Count'])) {
+              row.Communities = merged; row['Head Count'] = newHead;
+              row['Updated By'] = user.username; row['Updated At'] = now_();
+              if (!seen[row._row]) { seen[row._row] = 1; changed.push(row); }
+            }
+            return;
+          }
+          var id = givenId && !idx.ids[givenId] ? givenId : newWardId_(idx, w);
+          var nr = { 'Ward ID': id, State: w.state, LGA: w.lga, Ward: w.ward, Communities: w.communities.join('; '),
+            'Head Count': w.head === null ? 0 : w.head, 'Updated By': user.username, 'Updated At': now_(), _new: true };
+          idxAdd_(idx, nr);
+          added.push(nr);
         } catch (e) {
           errors.push('Row ' + (r._row || i + 2) + ': ' + e.message);
         }
       });
-      if (added.length) appendRows_('wards', added);
-      audit_(user.username, 'Imported wards', added.length + ' added, ' + updated + ' updated, ' + errors.length + ' skipped');
-      return { added: added.length, updated: updated, errors: errors };
+      if (changed.length) writeRows_('wards', changed);
+      if (added.length) {
+        var headers = TABLES.wards.headers;
+        appendRows_('wards', added.map(function (o) { return headers.map(function (h) { return o[h]; }); }));
+      }
+      audit_(user.username, 'Imported wards', added.length + ' added, ' + changed.length + ' updated, ' + errors.length + ' skipped');
+      return { added: added.length, updated: changed.length, errors: errors };
     });
   },
 
@@ -469,8 +486,14 @@ function validateMovement_(p, wardIdSet) {
   } else if (!findRow_('wards', 'Ward ID', wardId)) {
     throw new Error('That ward is not in the Ward Register.');
   }
+  var community = titleTrim_(String(p.community || ''));
+  if (community && !wardIdSet) {
+    var w = findRow_('wards', 'Ward ID', wardId).row;
+    var known = splitComms_(w.Communities).map(function (c) { return c.toLowerCase(); });
+    if (known.indexOf(community.toLowerCase()) < 0) throw new Error('That community is not listed under this ward.');
+  }
   return {
-    date: date, type: type, quantity: quantity, wardId: wardId,
+    date: date, type: type, quantity: quantity, wardId: wardId, community: community,
     reference: String(p.reference || '').trim(),
     officer: String(p.officer || '').trim(),
     remarks: String(p.remarks || '').trim()
@@ -527,12 +550,18 @@ function checkVoid_(row) {
 function validateWard_(p) {
   var state = matchState_(p.state);
   if (!state) throw new Error('Unknown state "' + (p.state || '') + '"');
-  var lga = requireText_(p.lga, 'LGA');
-  var community = requireText_(p.community, 'Community');
-  var ward = requireText_(p.ward, 'Ward name');
-  var head = Number(String(p.head === undefined ? '' : p.head).replace(/,/g, ''));
-  if (!(head >= 0) || Math.floor(head) !== head) throw new Error('Head count must be a whole number (0 or more).');
-  return { state: state, lga: titleTrim_(lga), community: titleTrim_(community), ward: titleTrim_(ward), head: head };
+  var lga = titleTrim_(requireText_(p.lga, 'LGA'));
+  var ward = titleTrim_(requireText_(p.ward, 'Ward name'));
+  if (lga === '0' || ward === '0') throw new Error('LGA or ward is missing ("0")');
+  var comms = Array.isArray(p.communities) ? p.communities : splitComms_(p.communities);
+  comms = mergeComms_([], comms.map(function (c) { return titleTrim_(String(c)).replace(/;/g, ','); }).filter(Boolean));
+  var raw = String(p.head === undefined || p.head === null ? '' : p.head).replace(/,/g, '').trim();
+  var head = null;
+  if (raw !== '') {
+    head = Number(raw);
+    if (!(head >= 0) || Math.floor(head) !== head) throw new Error('Head count must be a whole number (0 or more).');
+  }
+  return { state: state, lga: lga, ward: ward, communities: comms, head: head };
 }
 
 function matchState_(s) {
@@ -546,35 +575,59 @@ function matchState_(s) {
   return null;
 }
 
-function dupWard_(wards, w, exceptId) {
-  var key = [w.state, w.lga, w.community, w.ward].join('|').toLowerCase();
-  return wards.some(function (x) {
-    return String(x['Ward ID']) !== String(exceptId) &&
-      [x.State, x.LGA, x.Community, x.Ward].join('|').toLowerCase() === key;
-  });
+function splitComms_(v) {
+  return String(v || '').split(/\s*[;\n]\s*/).map(titleTrim_).filter(Boolean);
 }
 
-/** Builds an ID like LAG-IKE-01-W2 (state - LGA - community number - ward number). */
-function makeWardId_(wards, w) {
-  var code = function (s) { return String(s).toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'XXX'; };
-  var sc = code(w.state), lc = code(w.lga);
-  var same = function (a, b) { return String(a).toLowerCase() === String(b).toLowerCase(); };
-  var communities = [];
-  wards.forEach(function (x) {
-    if (same(x.State, w.state) && same(x.LGA, w.lga)) {
-      var c = String(x.Community).toLowerCase();
-      if (communities.indexOf(c) < 0) communities.push(c);
-    }
+function mergeComms_(a, b) {
+  var seen = {}, out = [];
+  a.concat(b).forEach(function (c) {
+    var k = c.toLowerCase();
+    if (!seen[k]) { seen[k] = 1; out.push(c); }
   });
-  var ci = communities.indexOf(w.community.toLowerCase());
-  if (ci < 0) { communities.push(w.community.toLowerCase()); ci = communities.length - 1; }
-  var ids = {};
-  wards.forEach(function (x) { ids[String(x['Ward ID'])] = true; });
-  var n = wards.filter(function (x) {
-    return same(x.State, w.state) && same(x.LGA, w.lga) && same(x.Community, w.community);
-  }).length + 1;
-  var id;
-  do { id = sc + '-' + lc + '-' + pad_(ci + 1, 2) + '-W' + n; n++; } while (ids[id]);
+  return out;
+}
+
+function wardKey_(state, lga, ward) { return [state, lga, ward].join('|').toLowerCase(); }
+
+/** Lookup tables for the Ward Register, built once per request. */
+function wardIndex_() {
+  var idx = { byId: {}, byKey: {}, ids: {}, lgaCode: {}, codeOwner: {}, lgaCount: {} };
+  readTable_('wards').forEach(function (w) { idxAdd_(idx, w); });
+  return idx;
+}
+
+function idxAdd_(idx, w) {
+  var id = String(w['Ward ID']);
+  idx.byId[id] = w; idx.ids[id] = true;
+  idx.byKey[wardKey_(w.State, w.LGA, w.Ward)] = w;
+  var lk = (w.State + '|' + w.LGA).toLowerCase();
+  var parts = id.split('-');
+  if (parts.length === 3 && !idx.lgaCode[lk]) {
+    idx.lgaCode[lk] = parts[1];
+    idx.codeOwner[w.State + '|' + parts[1]] = lk;
+  }
+  idx.lgaCount[lk] = (idx.lgaCount[lk] || 0) + 1;
+}
+
+/**
+ * Builds an ID like KAT-FUN-03: state code, LGA code, ward number in that LGA.
+ * If two LGAs in a state start with the same letters, the second gets a number (KAN, KAN2).
+ */
+function newWardId_(idx, w) {
+  var letters = function (s) { return String(s).toUpperCase().replace(/[^A-Z]/g, ''); };
+  var lk = (w.state + '|' + w.lga).toLowerCase();
+  var code = idx.lgaCode[lk];
+  if (!code) {
+    var base = letters(w.lga).slice(0, 3) || 'LGA', c = base, n = 2;
+    while (idx.codeOwner[w.state + '|' + c] && idx.codeOwner[w.state + '|' + c] !== lk) c = base + (n++);
+    code = c;
+    idx.lgaCode[lk] = code;
+    idx.codeOwner[w.state + '|' + code] = lk;
+  }
+  var sc = w.state === 'FCT' ? 'FCT' : letters(w.state).slice(0, 3);
+  var k = (idx.lgaCount[lk] || 0) + 1, id;
+  do { id = sc + '-' + code + '-' + pad_(k, 2); k++; } while (idx.ids[id]);
   return id;
 }
 
@@ -701,6 +754,19 @@ function updateRow_(key, row, changes) {
   delete tableCache_[key];
 }
 
+/** Writes back several changed row objects from readTable_ in one go. */
+function writeRows_(key, rows) {
+  var sh = sheet_(key);
+  var headers = TABLES[key].headers;
+  var min = Infinity, max = 0;
+  rows.forEach(function (r) { min = Math.min(min, r._row); max = Math.max(max, r._row); });
+  var range = sh.getRange(min, 1, max - min + 1, headers.length);
+  var values = range.getValues();
+  rows.forEach(function (r) { values[r._row - min] = headers.map(function (h) { return r[h] === undefined ? '' : r[h]; }); });
+  range.setValues(values);
+  delete tableCache_[key];
+}
+
 function audit_(username, action, details) {
   appendRows_('audit', [[now_(), username, action, details]]);
 }
@@ -722,7 +788,7 @@ function nextMovementId_() { return 'MV-' + pad_(movementCount_() + 1, 5); }
 function movementOut_(m) {
   return {
     id: m['Movement ID'], date: normDate_(m.Date) || fmtCell_(m.Date), reference: m['Reference No.'],
-    wardId: String(m['Ward ID']), type: m['Movement Type'], quantity: num_(m.Quantity),
+    wardId: String(m['Ward ID']), community: m.Community, type: m['Movement Type'], quantity: num_(m.Quantity),
     officer: m['Officer (handled by)'], recordedBy: m['Recorded By'], recordedAt: fmtCell_(m['Recorded At']),
     status: m.Status, approvedBy: m['Approved By'], approvedAt: fmtCell_(m['Approved At']),
     remarks: m.Remarks, note: m['Status Note']
@@ -808,13 +874,13 @@ window.google = { script: { run: (function mk(s, f) {
 
 function previewLoadSample() {
   var st = GAS.api('status');
-  if (!st.data.needsSetup) { alert('Sample data can only be loaded into an empty preview. Click "Start over" first.'); return; }
+  if (!st.data.needsSetup) { alert('The location list can only be loaded into an empty demo. Click "Start over" first.'); return; }
   var res = GAS.api('setupAdmin', null, { username: 'admin', fullName: 'Head of Card Dept', password: 'password1' });
   var tok = res.data.token;
   GAS.api('importWards', tok, { rows: PREVIEW_SAMPLE.wards });
-  GAS.api('importMovements', tok, { rows: PREVIEW_SAMPLE.movements });
-  GAS.api('saveUser', tok, { isNew: true, username: 'officer', fullName: 'B. Musa', role: 'officer', password: 'password1' });
-  GAS.api('saveUser', tok, { isNew: true, username: 'viewer', fullName: 'C. Okafor', role: 'viewer', password: 'password1' });
+  if (PREVIEW_SAMPLE.movements.length) GAS.api('importMovements', tok, { rows: PREVIEW_SAMPLE.movements });
+  GAS.api('saveUser', tok, { isNew: true, username: 'officer', fullName: 'Records Officer', role: 'officer', password: 'password1' });
+  GAS.api('saveUser', tok, { isNew: true, username: 'viewer', fullName: 'Department Viewer', role: 'viewer', password: 'password1' });
   try { sessionStorage.removeItem('ct_token'); } catch (e) {}
   location.reload();
 }
@@ -826,8 +892,8 @@ function previewReset() {
 document.addEventListener('DOMContentLoaded', function () {
   var bar = document.createElement('div');
   bar.id = 'preview-bar';
-  bar.innerHTML = '<b>Preview copy.</b> Data is saved only in this browser. Sample logins: <code>admin</code>, <code>officer</code>, <code>viewer</code> (password <code>password1</code>). ' +
-    '<button onclick="previewLoadSample()">Load sample data</button> <button onclick="previewReset()">Start over</button>';
+  bar.innerHTML = '<b>Preview copy.</b> Data is saved only in this browser. After loading the location list, sign in as <code>admin</code>, <code>officer</code> or <code>viewer</code> (password <code>password1</code>). ' +
+    '<button onclick="previewLoadSample()">Load location list</button> <button onclick="previewReset()">Start over</button>';
   bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:80;background:#fff3dc;color:#5a3a00;border-top:1px solid #e8c98a;padding:6px 12px;font:13px system-ui,sans-serif;display:flex;gap:8px;align-items:center;flex-wrap:wrap';
   document.body.appendChild(bar);
   document.body.style.paddingBottom = '64px';

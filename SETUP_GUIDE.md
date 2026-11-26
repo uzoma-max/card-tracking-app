@@ -60,22 +60,22 @@ This guide puts the card tracking app online for free, using a Google account. I
 ## Step 6. Add your wards
 
 Go to **Ward register**. You can either:
-- click **Add ward** and fill in State, LGA, Community, Ward name and Head count, or
-- click **Import wards from Excel** and choose a spreadsheet with the columns **State, LGA, Community, Ward, Head Count**. The app gives each ward an ID like `LAG-IKE-01-W1`.
+- click **Import wards from Excel** and choose the location list, `data/State-Ward.csv` in the repository (or any sheet with the columns **State, LGA, Ward, Community**, one community per row). It loads 2,184 wards and their communities in under a minute, and gives each ward an ID like `KAT-FUN-01`. Importing the same file again adds nothing twice, so you can re-import an updated list safely. Or
+- click **Add ward** and fill in State, LGA, Ward name, Head count and the communities in the ward.
 
-Head count is entered per ward. The app adds it up for every community, LGA, state and the whole country.
+Head count is entered per ward (click **Edit** on a ward, or import a sheet that has a **Head Count** column). The location list has no head counts, so every ward starts at 0. The app adds head counts up for every LGA, state and the whole country.
 
-**Want to try it first?** Import the `Ward Register` and `Movements Log` sheets from `Card_Tracking_Sample.xlsx` (Ward register › Import, then Movements › Import). The dashboard will match the sample workbook. When you are ready for real data, open the Google Sheet, and in the **Ward Register** and **Movements Log** tabs delete every row except the first (heading) row.
+**Want to try it first?** Open `Card_Tracking_Preview.html` on your computer and click **Load location list**. It has the same screens and the full location list, and nothing you do there affects the real app.
 
 ---
 
 ## Daily use
 
-- **Record a movement**: Movements tab › choose the type, date, quantity, the ward (State › LGA › Community › Ward), the officer who handled it, a reference number (waybill, delivery note) and remarks. The app shows the ward's current balance and stops entries that do not add up, for example distributing more cards than are in store.
+- **Record a movement**: Movements tab › choose the type, date, quantity, the ward (State › LGA › Ward) and, if you know it, the community, the officer who handled it, a reference number (waybill, delivery note) and remarks. The app shows the ward's current balance and stops entries that do not add up, for example distributing more cards than are in store.
 - **Approve**: officers' entries show as *Pending* with a count on the Movements tab. Admins click **Approve** or **Reject** (with a reason). Only approved entries count in the totals.
 - **Mistakes**: an approved movement is never deleted. An admin clicks **Void** and gives a reason. It stays in the log, marked Voided, and stops counting.
-- **Totals by area**: switch between State, LGA, Community and Ward, or click any row to go one level down.
-- **Export to Excel**: the button at the top downloads a workbook with the dashboard, state, LGA, community and ward summaries and the full movements log, for reconciliation.
+- **Totals by area**: switch between State, LGA and Ward, or click any row to go one level down.
+- **Export to Excel**: the button at the top downloads a workbook with the dashboard, state, LGA and ward summaries, the full list of communities in each ward, and the full movements log, for reconciliation.
 - **Audit trail** (admins): every sign-in and every change, with who did it and when.
 
 ## Good to know
